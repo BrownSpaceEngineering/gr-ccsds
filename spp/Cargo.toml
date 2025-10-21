@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-deku = "0.20.0"
+byteorder = "1.5.0"
