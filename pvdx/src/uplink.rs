@@ -5,9 +5,9 @@ use std::{
 };
 
 pub struct UplinkPacket {
-    pub uplink_header: UplinkPacketHeader,
-    pub uplink_cmd_header: UplinkCommandHeader,
-    pub data: Vec<u8>,
+    pub uplink_header: UplinkPacketHeader, // Callsign, overall size, number of commands
+    pub uplink_cmd_headers: Vec<UplinkCommandHeader>, // Each describes command type/size
+    pub data: Vec<u8>,                     // Actual commands -> See uplink structure sheet
 }
 
 impl UplinkPacket {
@@ -17,11 +17,6 @@ impl UplinkPacket {
 
     pub fn to_bytes(&self) -> std::io::Result<Vec<u8>> {
         todo!()
-
-
-
-        let mut writer = Cursor::new(Vec::new());
-        self.uplink_header.to_writer(&mut writer)?;
     }
 }
 
