@@ -1,143 +1,303 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::{
-    io::{Cursor, Read, Write},
-    process::Command,
-};
+use std::io::{Cursor, Read, Write};
 
+#[repr(C, align(4))]
 pub struct UplinkPacket {
-    pub uplink_header: UplinkPacketHeader, // Callsign, overall size, number of commands
-    pub uplink_cmd_headers: Vec<UplinkCommandHeader>, // Each describes command type/size
-    pub data: Vec<u8>,                     // Actual commands -> See uplink structure sheet
+    pub header: UplinkPacketHeader, // Callsign, total size, number of commands
+    pub cmd_headers: Vec<UplinkCommandHeader>, // Command type, size per command
+    pub commands: Vec<Command>,     // Command data
 }
 
 impl UplinkPacket {
+    pub fn new(callsign: [u8; 6], commands: Vec<Command>) -> Self {
+        let n_cmds = commands.len() as u16;
+        let header_size = 16;
+        let cmd_headers_size = n_cmds as u32 * 8;
+        let data_size: u32 = commands.iter().map(|cmd| cmd.data_size()).sum();
+        let total_size = header_size + cmd_headers_size + data_size;
+
+        let header = UplinkPacketHeader {
+            callsign,
+            _pad1: [0; 2],
+            size: total_size,
+            n_cmds,
+            _pad2: [0; 2],
+        };
+
+        let cmd_headers = commands
+            .iter()
+            .map(|cmd| UplinkCommandHeader {
+                cmd_type: cmd.cmd_type_to(),
+                _pad: [0; 2],
+                cmd_sz: cmd.data_size(),
+            })
+            .collect();
+
+        UplinkPacket {
+            header,
+            cmd_headers,
+            commands,
+        }
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> std::io::Result<Self> {
-        todo!()
+        let mut reader = Cursor::new(bytes);
+
+        let header = UplinkPacketHeader::from_reader(&mut reader)?;
+
+        let mut cmd_headers = Vec::with_capacity(header.n_cmds as usize);
+        for _ in 0..header.n_cmds {
+            let cmd_header = UplinkCommandHeader::from_reader(&mut reader)?;
+            cmd_headers.push(cmd_header);
+        }
+
+        let mut commands = Vec::with_capacity(header.n_cmds as usize);
+        for cmd_header in &cmd_headers {
+            let mut cmd_data = vec![0u8; cmd_header.cmd_sz as usize];
+            reader.read_exact(&mut cmd_data)?;
+            let command = Command::from_bytes(cmd_header.cmd_type, &cmd_data)?;
+            commands.push(command);
+        }
+
+        Ok(UplinkPacket {
+            header,
+            cmd_headers,
+            commands,
+        })
     }
 
     pub fn to_bytes(&self) -> std::io::Result<Vec<u8>> {
-        todo!()
-    }
-}
+        let mut writer = Cursor::new(Vec::new());
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum CommandType {
-    DeviceEnable,  // u8: Device in question
-    DeviceDisable, // u8: Device in question
-    DeviceBreak,   // u8: Device in question
-    DeviceUnbreak, // u8: Device in question
-    DisplayUpdate, // [u8: 8192]: Image bitmap
-    Sleep,         // u32: Duration to sleep
-    Reboot,
-    PictureCapture, // u32: Timestamp to take picture
-    PictureSend,    // u16: Number of pictures to send
-    SetTime,        // u32: UNIX Timestamp
-    SetPowerMode,
-    ADCSSetOpMode,
-    ADCSSetKeplers, // ADCSUpdate: Set Kepler Coefficients for ADCS
-}
+        self.header.to_writer(&mut writer)?;
 
-impl TryFrom<u8> for CommandType {
-    type Error = std::io::Error;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(CommandType::DeviceEnable),
-            1 => Ok(CommandType::DeviceDisable),
-            2 => Ok(CommandType::DeviceBreak),
-            3 => Ok(CommandType::DeviceUnbreak),
-            4 => Ok(CommandType::DisplayUpdate),
-            5 => Ok(CommandType::Sleep),
-            6 => Ok(CommandType::Reboot),
-            7 => Ok(CommandType::PictureCapture),
-            8 => Ok(CommandType::PictureSend),
-            9 => Ok(CommandType::SetTime),
-            10 => Ok(CommandType::SetPowerMode),
-            11 => Ok(CommandType::ADCSSetOpMode),
-            12 => Ok(CommandType::ADCSSetKeplers),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid command type",
-            )),
+        for cmd_header in &self.cmd_headers {
+            cmd_header.to_writer(&mut writer)?;
         }
-    }
-}
 
-impl TryFrom<CommandType> for u8 {
-    type Error = ();
+        for cmd in &self.commands {
+            let cmd_bytes = cmd.to_bytes()?;
+            writer.write_all(&cmd_bytes)?;
+        }
 
-    fn try_from(ct: CommandType) -> Result<Self, Self::Error> {
-        Ok(match ct {
-            CommandType::DeviceEnable => 0,
-            CommandType::DeviceDisable => 1,
-            CommandType::DeviceBreak => 2,
-            CommandType::DeviceUnbreak => 3,
-            CommandType::DisplayUpdate => 4,
-            CommandType::Sleep => 5,
-            CommandType::Reboot => 6,
-            CommandType::PictureCapture => 7,
-            CommandType::PictureSend => 8,
-            CommandType::SetTime => 9,
-            CommandType::SetPowerMode => 10,
-            CommandType::ADCSSetOpMode => 11,
-            CommandType::ADCSSetKeplers => 12,
-        })
+        Ok(writer.into_inner())
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum Command {
+    DeviceEnable { device: u8 },
+    DeviceDisable { device: u8 },
+    DeviceBreak { device: u8 },
+    DeviceUnbreak { device: u8 },
+    DisplayUpdate { bitmap: [u8; 8192] },
+    Sleep { duration: u32 },
+    Reboot,
+    PictureSend { count: u16 },
+    PictureCapture { timestamp: u32 },
+    SetTime { timestamp: u32 },
+    SetPowerMode { mode: u8 },
+    ADCSSetOpMode { mode: u8 },
+    ADCSSetKeplers { update: ADCSUpdate },
+}
+
+impl Command {
+    pub fn cmd_type_to(&self) -> u16 {
+        match self {
+            Command::DeviceEnable { .. } => 0,
+            Command::DeviceDisable { .. } => 1,
+            Command::DeviceBreak { .. } => 2,
+            Command::DeviceUnbreak { .. } => 3,
+            Command::DisplayUpdate { .. } => 4,
+            Command::Sleep { .. } => 5,
+            Command::Reboot => 6,
+            Command::PictureCapture { .. } => 7,
+            Command::PictureSend { .. } => 8,
+            Command::SetTime { .. } => 9,
+            Command::SetPowerMode { .. } => 10,
+            Command::ADCSSetOpMode { .. } => 11,
+            Command::ADCSSetKeplers { .. } => 12,
+        }
+    }
+
+    pub fn data_size(&self) -> u32 {
+        match self {
+            Command::DeviceEnable { .. } => 1,
+            Command::DeviceDisable { .. } => 1,
+            Command::DeviceBreak { .. } => 1,
+            Command::DeviceUnbreak { .. } => 1,
+            Command::DisplayUpdate { .. } => 8192,
+            Command::Sleep { .. } => 4,
+            Command::Reboot => 0,
+            Command::PictureSend { .. } => 2,
+            Command::PictureCapture { .. } => 4,
+            Command::SetTime { .. } => 4,
+            Command::SetPowerMode { .. } => 1,
+            Command::ADCSSetOpMode { .. } => 1,
+            Command::ADCSSetKeplers { .. } => 28,
+        }
+    }
+
+    pub fn to_bytes(&self) -> std::io::Result<Vec<u8>> {
+        let mut writer = Cursor::new(Vec::new());
+
+        match self {
+            Command::DeviceEnable { device } => writer.write_u8(*device)?,
+            Command::DeviceDisable { device } => writer.write_u8(*device)?,
+            Command::DeviceBreak { device } => writer.write_u8(*device)?,
+            Command::DeviceUnbreak { device } => writer.write_u8(*device)?,
+            Command::DisplayUpdate { bitmap } => writer.write_all(bitmap)?,
+            Command::Sleep { duration } => writer.write_u32::<BigEndian>(*duration)?,
+            Command::Reboot => {}
+            Command::PictureSend { count } => writer.write_u16::<BigEndian>(*count)?,
+            Command::PictureCapture { timestamp } => writer.write_u32::<BigEndian>(*timestamp)?,
+            Command::SetTime { timestamp } => writer.write_u32::<BigEndian>(*timestamp)?,
+            Command::SetPowerMode { mode } => writer.write_u8(*mode)?,
+            Command::ADCSSetOpMode { mode } => writer.write_u8(*mode)?,
+            Command::ADCSSetKeplers { update } => update.to_writer(&mut writer)?,
+        }
+
+        Ok(writer.into_inner())
+    }
+
+    pub fn from_bytes(cmd_type: u16, bytes: &[u8]) -> std::io::Result<Self> {
+        let mut reader = Cursor::new(bytes);
+
+        Ok(match cmd_type {
+            0 => {
+                let device = reader.read_u8()?;
+                Command::DeviceEnable { device }
+            }
+            1 => {
+                let device = reader.read_u8()?;
+                Command::DeviceDisable { device }
+            }
+            2 => {
+                let device = reader.read_u8()?;
+                Command::DeviceBreak { device }
+            }
+            3 => {
+                let device = reader.read_u8()?;
+                Command::DeviceUnbreak { device }
+            }
+            4 => {
+                let mut bitmap = [0u8; 8192];
+                reader.read_exact(&mut bitmap)?;
+                Command::DisplayUpdate { bitmap }
+            }
+            5 => {
+                let duration = reader.read_u32::<BigEndian>()?;
+                Command::Sleep { duration }
+            }
+            6 => Command::Reboot,
+            7 => {
+                let timestamp = reader.read_u32::<BigEndian>()?;
+                Command::PictureCapture { timestamp }
+            }
+            8 => {
+                let count = reader.read_u16::<BigEndian>()?;
+                Command::PictureSend { count }
+            }
+            9 => {
+                let timestamp = reader.read_u32::<BigEndian>()?;
+                Command::SetTime { timestamp }
+            }
+            10 => {
+                let mode = reader.read_u8()?;
+                Command::SetPowerMode { mode }
+            }
+            11 => {
+                let mode = reader.read_u8()?;
+                Command::ADCSSetOpMode { mode }
+            }
+            12 => {
+                let update = ADCSUpdate::from_reader(&mut reader)?;
+                Command::ADCSSetKeplers { update }
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid command type",
+                ));
+            }
+        })
+    }
+}
+
+#[repr(C, align(4))]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct UplinkPacketHeader {
     pub callsign: [u8; 6],
+    pub _pad1: [u8; 2],
     pub size: u32,
     pub n_cmds: u16,
+    pub _pad2: [u8; 2],
 }
 
 impl UplinkPacketHeader {
     pub fn from_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
         let mut callsign = [0u8; 6];
         reader.read_exact(&mut callsign)?;
+        let mut _pad1 = [0u8; 2];
+        reader.read_exact(&mut _pad1)?;
         let size = reader.read_u32::<BigEndian>()?;
         let n_cmds = reader.read_u16::<BigEndian>()?;
+        let mut _pad2 = [0u8; 2];
+        reader.read_exact(&mut _pad2)?;
 
         Ok(UplinkPacketHeader {
             callsign,
+            _pad1,
             size,
             n_cmds,
+            _pad2,
         })
     }
 
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_all(&self.callsign)?;
+        writer.write_all(&self._pad1)?;
         writer.write_u32::<BigEndian>(self.size)?;
         writer.write_u16::<BigEndian>(self.n_cmds)?;
+        writer.write_all(&self._pad2)?;
 
         Ok(())
     }
 }
 
+#[repr(C, align(4))]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct UplinkCommandHeader {
-    pub cmd_type: CommandType,
+    pub cmd_type: u16,
+    pub _pad: [u8; 2],
     pub cmd_sz: u32,
 }
 
 impl UplinkCommandHeader {
     pub fn from_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        let cmd_type_u8 = reader.read_u8()?;
-        let cmd_type = CommandType::try_from(cmd_type_u8)?;
+        let cmd_type = reader.read_u16::<BigEndian>()?;
+        let mut _pad = [0u8; 2];
+        reader.read_exact(&mut _pad)?;
         let cmd_sz = reader.read_u32::<BigEndian>()?;
 
-        Ok(UplinkCommandHeader { cmd_type, cmd_sz })
+        Ok(UplinkCommandHeader {
+            cmd_type,
+            _pad,
+            cmd_sz,
+        })
     }
 
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        let cmd_type_u8: u8 = self.cmd_type.try_into()?;
-        writer.write_u8(cmd_type_u8)?;
+        writer.write_u16::<BigEndian>(self.cmd_type)?;
+        writer.write_all(&self._pad)?;
         writer.write_u32::<BigEndian>(self.cmd_sz)?;
 
         Ok(())
     }
 }
 
+#[repr(C, align(4))]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct ADCSUpdate {
     pub timestamp: u32,
     pub inclination: f32,
