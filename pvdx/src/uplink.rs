@@ -4,21 +4,42 @@ use std::{
     process::Command,
 };
 
+pub struct UplinkPacket {
+    pub uplink_header: UplinkPacketHeader,
+    pub uplink_cmd_header: UplinkCommandHeader,
+    pub data: Vec<u8>,
+}
+
+impl UplinkPacket {
+    pub fn from_bytes(bytes: &[u8]) -> std::io::Result<Self> {
+        todo!()
+    }
+
+    pub fn to_bytes(&self) -> std::io::Result<Vec<u8>> {
+        todo!()
+
+
+
+        let mut writer = Cursor::new(Vec::new());
+        self.uplink_header.to_writer(&mut writer)?;
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum CommandType {
     DeviceEnable,  // u8: Device in question
     DeviceDisable, // u8: Device in question
     DeviceBreak,   // u8: Device in question
     DeviceUnbreak, // u8: Device in question
-    DisplayUpdate, // Args: Image bitmap
-    Sleep,         // Args: Duration to sleep
+    DisplayUpdate, // [u8: 8192]: Image bitmap
+    Sleep,         // u32: Duration to sleep
     Reboot,
-    PictureCapture, // Args: Timestamp to take picture
-    PictureSend,    // Args: Number of pictures to send
-    SetTime,        // Args: UNIX Timestamp
+    PictureCapture, // u32: Timestamp to take picture
+    PictureSend,    // u16: Number of pictures to send
+    SetTime,        // u32: UNIX Timestamp
     SetPowerMode,
     ADCSSetOpMode,
-    ADCSSetKeplers, // Set Kepler Coefficients for ADCS
+    ADCSSetKeplers, // ADCSUpdate: Set Kepler Coefficients for ADCS
 }
 
 impl TryFrom<u8> for CommandType {
@@ -99,22 +120,22 @@ impl UplinkPacketHeader {
     }
 }
 
-pub struct UplinkCommand {
+pub struct UplinkCommandHeader {
     pub cmd_type: CommandType,
     pub cmd_sz: u32,
 }
 
-impl UplinkCommand {
+impl UplinkCommandHeader {
     pub fn from_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
         let cmd_type_u8 = reader.read_u8()?;
         let cmd_type = CommandType::try_from(cmd_type_u8)?;
         let cmd_sz = reader.read_u32::<BigEndian>()?;
 
-        Ok(UplinkCommand { cmd_type, cmd_sz })
+        Ok(UplinkCommandHeader { cmd_type, cmd_sz })
     }
 
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        let cmd_type_u8: u8 = self.cmd_type.into();
+        let cmd_type_u8: u8 = self.cmd_type.try_into()?;
         writer.write_u8(cmd_type_u8)?;
         writer.write_u32::<BigEndian>(self.cmd_sz)?;
 
