@@ -6,9 +6,9 @@ CCSDS-based communications stack and tools.
 
 ## Design Documents
 
-We will be releasing our communications design documentation as open-source
+We will be releasing our communications design documentation open-source
 as progress is made on PVDX, but we are currently exploring the best means
-to do so as our internal documentation is on a different platform.
+to do so, given our internal documentation is on a different platform.
 
 For now, if you'd like access, please email either
 bse@brown.edu or alexander_khosrowshahi@brown.edu and put
