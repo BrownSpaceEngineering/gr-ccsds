@@ -2,6 +2,8 @@
 #include <iostream>
 #include <bitset>
 #include <vector>
+#include <array>
+#include <cstdint>
 
 // Transfer Frame Data Sizes
 #define SECURITY_HEADER_LENGTH 				6
@@ -69,7 +71,7 @@ struct OperationalControlField {
 };
 
 struct FrameErrorControlField {
-	uint8_t FECFData[4]; //Generated using CRC
+	std::array<uint8_t, 4> FECFData; //Generated using CRC
 };
 
 struct TransferFrame {
@@ -93,19 +95,19 @@ void appendVector(std::vector<uint8_t>& dest, const std::vector<uint8_t>& src) {
 std::vector<uint8_t> packPrimaryHeader(TFPrimaryHeader tfph) {
     uint64_t packedHeader = 0;
 
-    packedHeader |= ((uint64_t)(tfph.TFVN))                   << TFVN_POS;
-    packedHeader |= ((uint64_t)(tfph.SCID))                   << SCID_POS;
-    packedHeader |= ((uint64_t)(tfph.sourceOrDestinationID))  << SRC_DST_ID_POS;
-    packedHeader |= ((uint64_t)(tfph.VCID))                   << VCID_POS;
-    packedHeader |= ((uint64_t)(tfph.MAPID))                  << MAPID_POS;
-    packedHeader |= ((uint64_t)(tfph.endTFPrimaryHeaderFlag)) << END_TF_PRIMARY_HEADER_FLAG_POS;
-    packedHeader |= ((uint64_t)(tfph.TFLength))               << TF_LENGTH_POS;
-    packedHeader |= ((uint64_t)(tfph.bypassSequenceControlFlag)) << BYPASS_SEQ_CTRL_FLAG_POS;
-    packedHeader |= ((uint64_t)(tfph.protocolCommandControlFlag)) << PROTOCOL_CMD_CTRL_FLAG_POS;
-    packedHeader |= ((uint64_t)(tfph.spare))                  << SPARE_POS;
-    packedHeader |= ((uint64_t)(tfph.operationalControlFieldFlag)) << OCF_FLAG_POS;
-    packedHeader |= ((uint64_t)(tfph.VCFrameCountLength))    << VC_FRAME_COUNT_LENGTH_POS;
-	packedHeader |= ((uint64_t)(tfph.VCFrameCountField))    << VC_FRAME_COUNT_POS;
+    packedHeader |= ((uint64_t)(tfph.TFVN))                   		<< TFVN_POS;
+    packedHeader |= ((uint64_t)(tfph.SCID))                   		<< SCID_POS;
+    packedHeader |= ((uint64_t)(tfph.sourceOrDestinationID))  		<< SRC_DST_ID_POS;
+    packedHeader |= ((uint64_t)(tfph.VCID))                   		<< VCID_POS;
+    packedHeader |= ((uint64_t)(tfph.MAPID))                  		<< MAPID_POS;
+    packedHeader |= ((uint64_t)(tfph.endTFPrimaryHeaderFlag)) 		<< END_TF_PRIMARY_HEADER_FLAG_POS;
+    packedHeader |= ((uint64_t)(tfph.TFLength))               		<< TF_LENGTH_POS;
+    packedHeader |= ((uint64_t)(tfph.bypassSequenceControlFlag)) 	<< BYPASS_SEQ_CTRL_FLAG_POS;
+    packedHeader |= ((uint64_t)(tfph.protocolCommandControlFlag)) 	<< PROTOCOL_CMD_CTRL_FLAG_POS;
+    packedHeader |= ((uint64_t)(tfph.spare))                  		<< SPARE_POS;
+    packedHeader |= ((uint64_t)(tfph.operationalControlFieldFlag)) 	<< OCF_FLAG_POS;
+    packedHeader |= ((uint64_t)(tfph.VCFrameCountLength))    		<< VC_FRAME_COUNT_LENGTH_POS;
+	packedHeader |= ((uint64_t)(tfph.VCFrameCountField))    		<< VC_FRAME_COUNT_POS;
 
 	std::vector<uint8_t> packedHeaderVector;
 
@@ -202,47 +204,64 @@ enum MessageType {
 
 std::array<uint8_t, 4> CRCGenerator() {
 	//To be implemented later
+	std::array<uint8_t, 4> CRC{};
+
+	return CRC;
 }
 
-TransferFrame GetTransferFrame(
-		int VCID, 
-		bool endTFPrimaryHeaderFlag, 
-		int TFLength, 
-		bool bypassSequenceControlFlag,
-		bool protocolCommandControlFlag,
-		bool operationalControlFieldFlag,
-		int VCFrameCountLength,
-		int VCFrameCountField
-) {
-	// Build the Transfer Frame Primary Header
+TFPrimaryHeader GetPrimaryHeader(int VCID) {
 	TFPrimaryHeader tfph;
-	
+	tfph.protocolCommandControlFlag = false; //Until we work on COP
 	tfph.TFVN = 4; // Just carries the current version
 	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
+	tfph.endTFPrimaryHeaderFlag;
+	tfph.bypassSequenceControlFlag;
+	tfph.protocolCommandControlFlag;
+	tfph.operationalControlFieldFlag; //Seems like a good safeguard to have
+	tfph.VCFrameCountLength;
+	tfph.VCFrameCountField;
+
 	//tfph.TFLength = 0; // To be decided later (measured in octets)
-	tfph.endTFPrimaryHeaderFlag = endTFPrimaryHeaderFlag;
-	tfph.bypassSequenceControlFlag = bypassSequenceControlFlag;
-	tfph.protocolCommandControlFlag = protocolCommandControlFlag;
 	//tfph.spare = 0b00; //Decide what to do with this later
-	tfph.operationalControlFieldFlag = operationalControlFieldFlag; //Seems like a good safeguard to have
-	tfph.VCFrameCountLength = VCFrameCountLength;
-	tfph.VCFrameCountField = VCFrameCountField;
-
-
 	//tfph.SCID = 0; // Constant we decide on when the mission launches
 
-	// Build the Transfer Frame Insert Zone
-	TFInsertZone tfiz;
+	return tfph;
+}
 
-	// Build the Transfer Frame Data Field
+TFInsertZone GetInsertZone() {
+	TFInsertZone insertZone;
+	
+	return insertZone;
+}
+
+TFDataField GetDataField(std::vector<uint8_t> data) {
 	TFDataField tfdf;
 
-	// Build the Operational Control Field
+	return tfdf;
+}
+
+OperationalControlField GetOperationalControlField() {
 	OperationalControlField ocf;
 
-	// Build the Frame Error Control Field
-	FrameErrorControlField fecf;
+	return ocf;
+}
+
+FrameErrorControlField GetFrameErrorControlField() {
+	FrameErrorControlField fecf {CRCGenerator()};
+
+	return fecf;
+}
+
+// Converts higher level input data into a Transfer Frame ready for transmission
+TransferFrame DataToTransferFrame(MessageType type, std::vector<uint8_t> data) {
+	int VCID = type; //either 1 or 2 depending on command or bitmap
+
+	TFPrimaryHeader tfph = GetPrimaryHeader(VCID);
+	TFInsertZone tfiz = GetInsertZone();
+	TFDataField tfdf = GetDataField(data);
+	OperationalControlField ocf = GetOperationalControlField();
+	FrameErrorControlField fecf = GetFrameErrorControlField();
 
 	// Assemble the Transfer Frame
 	TransferFrame tf;
@@ -253,47 +272,13 @@ TransferFrame GetTransferFrame(
 	tf.FECF = fecf;
 
 	return tf;
-	
-	/*
-	tfph.SCID = this.SCID
-	tfph.sourceOrDestinationID = this.sourceOrDestinationID;
-    tfph.VCID = VCID
-    tfph.MAPID = this.MAPID
-    tfph.endTFPrimaryHeaderFlag = endTFPrimaryHeaderFlag
-	tfph.TFLength = TFLength
-	tfph.bypassSequenceControlFlag = bypassSequenceControlFlag
-	tfph.protocolCommandControlFlag = protocolCommandControlFlag
-	tfph.spare = 0b00; //Decide what to do with these later on
-	tfph.operationalControlFieldFlag = True; //Seems like a good safeguard to have
-	tfph.VCFrameCountLength = VCFrameCountLength;
-	tfph.VCFrameCountField = VCFrameCountField;
-	*/
-}
-
-// Converts higher level input data into a Transfer Frame ready for transmission
-TransferFrame DataToTransferFrame(MessageType type, std::vector<uint8_t> data) {
-	int VCID = type; //either 1 or 2 depending on command or bitmap
-	bool protocolCommandControlFlag = false; //Until we work on COP
-	//int VCFrameCountLength = TBD;
-	//int VCFrameCountField = TBD;
-
-	TransferFrame tf;
-	/*TransferFrame tf = GetTransferFrame(
-		VCID, 
-		endTFPrimaryHeaderFlag, 
-		TFLength, 
-		protocolCommandControlFlag,
-		VCFrameCountLength,
-		VCFrameCountField
-	);*/
-
-	return tf;
 }
 
 // Converts higher level input data into a stream of bytes for the physical layer
 std::vector<uint8_t> DataToStream(MessageType type, std::vector<uint8_t> data) {
 	TransferFrame tf = DataToTransferFrame(type, data);
 	std::vector<uint8_t> packedFrame = packTransferFrame(tf);
+
 	return packedFrame;
 }
 
