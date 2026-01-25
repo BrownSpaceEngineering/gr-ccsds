@@ -33,15 +33,15 @@
 struct TFPrimaryHeader {
 	uint16_t TFVN = 4;
 	uint16_t SCID;
-	bool sourceOrDestinationID; //bool
+	bool sourceOrDestinationID;
 	uint16_t VCID;
 	uint16_t MAPID;
-	bool endTFPrimaryHeaderFlag; //bool
+	bool endTFPrimaryHeaderFlag;
 	uint16_t TFLength;
-	bool bypassSequenceControlFlag; //bool
-	bool protocolCommandControlFlag; //bool
+	bool bypassSequenceControlFlag;
+	bool protocolCommandControlFlag;
 	uint16_t spare;
-	bool operationalControlFieldFlag; //bool
+	bool operationalControlFieldFlag;
 	uint16_t VCFrameCountLength;
 	uint32_t VCFrameCountField;
 };
@@ -195,8 +195,110 @@ std::vector<uint8_t> packTransferFrame(TransferFrame tf) {
 	return packedTransferFrame;
 }
 
+enum MessageType {
+	COMMAND = 1, 
+	BITMAP = 2
+};
+
+std::array<uint8_t, 4> CRCGenerator() {
+	//To be implemented later
+}
+
+TransferFrame GetTransferFrame(
+		int VCID, 
+		bool endTFPrimaryHeaderFlag, 
+		int TFLength, 
+		bool bypassSequenceControlFlag,
+		bool protocolCommandControlFlag,
+		bool operationalControlFieldFlag,
+		int VCFrameCountLength,
+		int VCFrameCountField
+) {
+	// Build the Transfer Frame Primary Header
+	TFPrimaryHeader tfph;
+	
+	tfph.TFVN = 4; // Just carries the current version
+	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
+	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
+	//tfph.TFLength = 0; // To be decided later (measured in octets)
+	tfph.endTFPrimaryHeaderFlag = endTFPrimaryHeaderFlag;
+	tfph.bypassSequenceControlFlag = bypassSequenceControlFlag;
+	tfph.protocolCommandControlFlag = protocolCommandControlFlag;
+	//tfph.spare = 0b00; //Decide what to do with this later
+	tfph.operationalControlFieldFlag = operationalControlFieldFlag; //Seems like a good safeguard to have
+	tfph.VCFrameCountLength = VCFrameCountLength;
+	tfph.VCFrameCountField = VCFrameCountField;
+
+
+	//tfph.SCID = 0; // Constant we decide on when the mission launches
+
+	// Build the Transfer Frame Insert Zone
+	TFInsertZone tfiz;
+
+	// Build the Transfer Frame Data Field
+	TFDataField tfdf;
+
+	// Build the Operational Control Field
+	OperationalControlField ocf;
+
+	// Build the Frame Error Control Field
+	FrameErrorControlField fecf;
+
+	// Assemble the Transfer Frame
+	TransferFrame tf;
+	tf.TFPH = tfph;
+	tf.TFIZ = tfiz;
+	tf.TFDF = tfdf;
+	tf.OCF = ocf;
+	tf.FECF = fecf;
+
+	return tf;
+	
+	/*
+	tfph.SCID = this.SCID
+	tfph.sourceOrDestinationID = this.sourceOrDestinationID;
+    tfph.VCID = VCID
+    tfph.MAPID = this.MAPID
+    tfph.endTFPrimaryHeaderFlag = endTFPrimaryHeaderFlag
+	tfph.TFLength = TFLength
+	tfph.bypassSequenceControlFlag = bypassSequenceControlFlag
+	tfph.protocolCommandControlFlag = protocolCommandControlFlag
+	tfph.spare = 0b00; //Decide what to do with these later on
+	tfph.operationalControlFieldFlag = True; //Seems like a good safeguard to have
+	tfph.VCFrameCountLength = VCFrameCountLength;
+	tfph.VCFrameCountField = VCFrameCountField;
+	*/
+}
+
+// Converts higher level input data into a Transfer Frame ready for transmission
+TransferFrame DataToTransferFrame(MessageType type, std::vector<uint8_t> data) {
+	int VCID = type; //either 1 or 2 depending on command or bitmap
+	bool protocolCommandControlFlag = false; //Until we work on COP
+	//int VCFrameCountLength = TBD;
+	//int VCFrameCountField = TBD;
+
+	TransferFrame tf;
+	/*TransferFrame tf = GetTransferFrame(
+		VCID, 
+		endTFPrimaryHeaderFlag, 
+		TFLength, 
+		protocolCommandControlFlag,
+		VCFrameCountLength,
+		VCFrameCountField
+	);*/
+
+	return tf;
+}
+
+// Converts higher level input data into a stream of bytes for the physical layer
+std::vector<uint8_t> DataToStream(MessageType type, std::vector<uint8_t> data) {
+	TransferFrame tf = DataToTransferFrame(type, data);
+	std::vector<uint8_t> packedFrame = packTransferFrame(tf);
+	return packedFrame;
+}
+
 int main(int argc, char* argv[]) {
-	// Example usage
+	// Test packing a Transfer Frame Primary Header
 	TFPrimaryHeader tfph;
 	tfph.TFVN = 4;
 	tfph.SCID = 2;
@@ -217,57 +319,3 @@ int main(int argc, char* argv[]) {
 
 	return 0;
 }
-
-/*
-class GlobalData {
-	SCID; //Constant we decide on when the mission launches
-	TFVN = 4; //Just carries the current version
-	sourceOrDestinationID = 1; //0 is more important for multi-recipient systems
-	MAPID = 0; //We do not need MAP, not so many pieces of data to transfer
-	TFDFSize; //To be decided later (measured in octets)
-
-	Def GetTransferFrame(
-VCID, 
-endTFPrimaryHeaderFlag, 
-TFLength, 
-bypassSequenceControlFlag,
-protocolCommandControlFlag) 
-{
-	TFPrimaryHeader tfph;
-	tfph.TFVN = this.TFVN
-	tfph.SCID = this.SCID
-	tfph.sourceOrDestinationID = this.sourceOrDestinationID;
-    tfph.VCID = VCID
-    tfph.MAPID = this.MAPID
-    tfph.endTFPrimaryHeaderFlag = endTFPrimaryHeaderFlag
-	tfph.TFLength = TFLength
-	tfph.bypassSequenceControlFlag = bypassSequenceControlFlag
-	tfph.protocolCommandControlFlag = protocolCommandControlFlag
-	tfph.spare = 0b00; //Decide what to do with these later on
-	tfph.operationalControlFieldFlag = True; //Seems like a good safeguard to have
-	tfph.VCFrameCountLength = VCFrameCountLength;
-	tfph.VCFrameCountField = VCFrameCountField;
-
-	
-}
-
-Def SendCommand(enum type, data) {
-
-	VCID = parseType(); //either 1 or 2 depending on command or bitmap
-	protocolCommandControlFlag = False //Until we work on COP
-		VCFrameCountLength = TBD;
-		VCFrameCountField = TBD;
-
-	TransferFrame TF = GetTransferFrame(
-VCID, 
-endTFPrimaryHeaderFlag, 
-TFLength, 
-protocolCommandControlFlag,
-VCFrameCountLength,
-VCFrameCountField);
-
-
-}
-
-}
-*/
