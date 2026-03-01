@@ -4,12 +4,19 @@
 #include <vector>
 #include <array>
 #include <cstdint>
+#include "CRCpp/inc/CRC.h"
 
-// Transfer Frame Data Sizes
-#define SECURITY_HEADER_LENGTH 				6
-#define SECURITY_TRAILER_LENGTH 			16
+// Transfer Frame Data Lengths in bytes
+#define MAX_SECURITY_HEADER_LENGTH 			20
+#define MAX_SECURITY_TRAILER_LENGTH 		20
+#define MAX_DATA_FIELD_LENGTH				1014 // Max Transfer Frame size - mandatory bytes
+#define MAX_DATA_ZONE_LENGTH				1014 // Max Transfer Frame size - mandatory bytes
+#define MAX_INSERT_ZONE_LENGTH				1024 // Apparently specified to worst case take maximum TF size
 #define OCF_DATA_LENGTH 					4
 #define FECF_DATA_LENGTH 					4
+#define MAX_TRANSFER_FRAME_LENGTH 			1024
+#define PRIMARY_HEADER_LENGTH				8
+#define DATA_FIELD_HEADER_LENGTH			3
 
 // Transfer Frame Primary Header field bit positions
 #define TFVN_POS                        	0    // 4 bits
@@ -32,6 +39,15 @@
 #define USLP_PROTOCOL_ID_POS				3  // 5 bits
 #define FIRST_HEADER_LAST_VALID_OCTET_POS	8  // 16 bits
 
+// Fixed-size buffer structure
+template <size_t Capacity>
+
+// Replacement of std::vector for fixed-size bit buffers
+struct BitBuffer {
+	std::array<uint8_t, Capacity> data; // Arbitrary size, can be adjusted as needed
+	size_t length = 0; // Actual length of data in bytes
+};
+
 struct TFPrimaryHeader {
 	uint16_t TFVN = 4;
 	uint16_t SCID;
@@ -50,7 +66,7 @@ struct TFPrimaryHeader {
 
 //Complete black box
 struct TFInsertZone {
-	std::vector<uint8_t> TFIZData;
+	BitBuffer<MAX_INSERT_ZONE_LENGTH> TFIZData;
 };
 
 struct TFDFHeader {
@@ -60,18 +76,19 @@ struct TFDFHeader {
 };
 
 struct TFDataField {
-	uint8_t securityHeader[SECURITY_HEADER_LENGTH];
+	BitBuffer<MAX_SECURITY_HEADER_LENGTH> securityHeader;
 	TFDFHeader header;
-	std::vector<uint8_t> TFDZ; //ALL THE DATA YOU WANT TO SEND GOES HERE
-	uint8_t securityTrailer[SECURITY_TRAILER_LENGTH];
+	BitBuffer<MAX_DATA_ZONE_LENGTH> TFDZ; //ALL THE DATA YOU WANT TO SEND GOES HERE
+	BitBuffer<MAX_SECURITY_TRAILER_LENGTH> securityTrailer;
 };
 
 struct OperationalControlField {
-	uint8_t OCFData[OCF_DATA_LENGTH]; //idk
+	uint8_t SDUType; // 3 bits
+	uint32_t OCFData; // 29 bits
 };
 
 struct FrameErrorControlField {
-	std::array<uint8_t, 4> FECFData; //Generated using CRC
+	BitBuffer<FECF_DATA_LENGTH> FECFData; //Generated using 32-bit CRC
 };
 
 struct TransferFrame {
@@ -86,13 +103,19 @@ void appendVector(std::vector<uint8_t>& dest, const std::vector<uint8_t>& src) {
     dest.insert(dest.end(), src.begin(), src.end());
 }
 
-/*void packArray(uint8_t arr[], std::vector<uint8_t> packedData) {
-	for (int i = 0; i < sizeof(arr); i++) {
-		packedData.push_back(arr[i]);
-	}
-}*/
+template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_t numBytes) {
+    BitBuffer<Capacity> buffer;
+    buffer.length = numBytes;
 
-std::vector<uint8_t> packPrimaryHeader(TFPrimaryHeader tfph) {
+    for (size_t i = 0; i < numBytes; i++) {
+        buffer.data[numBytes - 1 - i] = static_cast<uint8_t>(value & 0xFF);
+        value >>= 8;
+    }
+
+    return buffer;
+}
+
+BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph) {
     uint64_t packedHeader = 0;
 
     packedHeader |= ((uint64_t)(tfph.TFVN))                   		<< TFVN_POS;
@@ -101,7 +124,7 @@ std::vector<uint8_t> packPrimaryHeader(TFPrimaryHeader tfph) {
     packedHeader |= ((uint64_t)(tfph.VCID))                   		<< VCID_POS;
     packedHeader |= ((uint64_t)(tfph.MAPID))                  		<< MAPID_POS;
     packedHeader |= ((uint64_t)(tfph.endTFPrimaryHeaderFlag)) 		<< END_TF_PRIMARY_HEADER_FLAG_POS;
-    packedHeader |= ((uint64_t)(tfph.TFLength))               		<< TF_LENGTH_POS;
+    packedHeader |= ((uint64_t)(tfph.TFLength))                		<< TF_LENGTH_POS;
     packedHeader |= ((uint64_t)(tfph.bypassSequenceControlFlag)) 	<< BYPASS_SEQ_CTRL_FLAG_POS;
     packedHeader |= ((uint64_t)(tfph.protocolCommandControlFlag)) 	<< PROTOCOL_CMD_CTRL_FLAG_POS;
     packedHeader |= ((uint64_t)(tfph.spare))                  		<< SPARE_POS;
@@ -109,92 +132,82 @@ std::vector<uint8_t> packPrimaryHeader(TFPrimaryHeader tfph) {
     packedHeader |= ((uint64_t)(tfph.VCFrameCountLength))    		<< VC_FRAME_COUNT_LENGTH_POS;
 	packedHeader |= ((uint64_t)(tfph.VCFrameCountField))    		<< VC_FRAME_COUNT_POS;
 
-	std::vector<uint8_t> packedHeaderVector;
+	int numBytes = (tfph.endTFPrimaryHeaderFlag == 1) ? 4 : 8;
 
-	for (int i = 0; i < 8; i++) {
-		packedHeaderVector.push_back(uint8_t(packedHeader & 0xFF));
-		packedHeader >>= 8;
-	}
-
-    return packedHeaderVector;
+    return packInteger<PRIMARY_HEADER_LENGTH>(packedHeader, numBytes);
 }
 
-std::vector<uint8_t> packInsertZone(TFInsertZone tfiz) {
+BitBuffer<MAX_INSERT_ZONE_LENGTH> packInsertZone(TFInsertZone tfiz) {
     return tfiz.TFIZData;
 };
 
-std::vector<uint8_t> packDataFieldHeader(TFDFHeader tfdfh) {
-    uint32_t packedHeader = 0;
+BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh) {
+    uint32_t packed = 0;
 
-    packedHeader |= ((uint32_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
-    packedHeader |= ((uint32_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;
-    packedHeader |= ((uint32_t)(tfdfh.FirstHeaderLastValidOctetPointer))  << FIRST_HEADER_LAST_VALID_OCTET_POS;
+    packed |= ((uint32_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
+    packed |= ((uint32_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;
+    packed |= ((uint32_t)(tfdfh.FirstHeaderLastValidOctetPointer))  << FIRST_HEADER_LAST_VALID_OCTET_POS;
 
-	std::vector<uint8_t> packedHeaderVector;
+	int numBytes = DATA_FIELD_HEADER_LENGTH;
 
-	for (int i = 0; i < 3; i++) {
-		packedHeaderVector.push_back(uint8_t(packedHeader & 0xFF));
-		packedHeader >>= 8;
-	}
-
-    return packedHeaderVector;
+    return packInteger<DATA_FIELD_HEADER_LENGTH>(packed, numBytes);
 }
 
-std::vector<uint8_t> packDataField(TFDataField tfdf) {
-    const int TFDZLength = tfdf.TFDZ.size();
-	const int headerLength = 3;
-	std::vector<uint8_t> packedDataField;
-	
-	for (int i = 0; i < SECURITY_HEADER_LENGTH; i++) {
-		packedDataField.push_back(tfdf.securityHeader[i]);
-	}
-	
-	std::vector<uint8_t> packedHeader = packDataFieldHeader(tfdf.header);
-	appendVector(packedDataField, packedHeader);
-	appendVector(packedDataField, tfdf.TFDZ);
+template <size_t M, size_t N> void append(const BitBuffer<M>& src, BitBuffer<N>& dest, size_t& offset) {
+	std::copy(src.data.begin(),
+			  src.data.begin() + src.length,
+			  dest.data.begin() + offset);
+	offset += src.length;
+};
 
-	for (int i = 0; i < SECURITY_TRAILER_LENGTH; i++) {
-		packedDataField.push_back(tfdf.securityTrailer[i]);
-	}
+BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf) {
+	BitBuffer<MAX_DATA_FIELD_LENGTH> packed;
+    BitBuffer<3> packedHeader = packDataFieldHeader(tfdf.header);
+    size_t offset = 0;
 
-    return packedDataField;
+    append(tfdf.securityHeader, packed, offset);
+    append(packedHeader, packed, offset);
+    append(tfdf.TFDZ, packed, offset);
+    append(tfdf.securityTrailer, packed, offset);
+
+    packed.length = offset;
+
+    return packed;
 }
 
-std::vector<uint8_t> packOperationalControlField(OperationalControlField ocf) {
-	std::vector<uint8_t> packedOperationalControlField;
-	
-	for (int i = 0; i < OCF_DATA_LENGTH; i++) {
-		packedOperationalControlField.push_back(ocf.OCFData[i]);
-	}
+BitBuffer<OCF_DATA_LENGTH> packOperationalControlField(OperationalControlField ocf) {
+	uint32_t packed = 0;
 
-    return packedOperationalControlField;
+    packed |= ((uint32_t)(ocf.SDUType)) << 29;
+    packed |= ((uint32_t)(ocf.OCFData));
+	int numBytes = OCF_DATA_LENGTH;
+
+    return packInteger<OCF_DATA_LENGTH>(packed, numBytes);
 }
 
-std::vector<uint8_t> packFrameErrorControlField(FrameErrorControlField fecf) {
-	std::vector<uint8_t> packedOperationalControlField;
-	
-	for (int i = 0; i < FECF_DATA_LENGTH; i++) {
-		packedOperationalControlField.push_back(fecf.FECFData[i]);
-	}
-
-    return packedOperationalControlField;
+BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fecf) {
+    return fecf.FECFData;
 }
 
-std::vector<uint8_t> packTransferFrame(TransferFrame tf) {
-	std::vector<uint8_t> packedTransferFrame;
+BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf) {
+	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packed;
+	BitBuffer<PRIMARY_HEADER_LENGTH> packedPrimaryHeader = packPrimaryHeader(tf.TFPH);
+	BitBuffer<MAX_INSERT_ZONE_LENGTH> packedInsertZone = packInsertZone(tf.TFIZ);
+	BitBuffer<MAX_DATA_FIELD_LENGTH> packedDataField = packDataField(tf.TFDF);
+	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF);
+	BitBuffer<FECF_DATA_LENGTH> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);
 
-	std::vector<uint8_t> packedPrimaryHeader = packPrimaryHeader(tf.TFPH);
-	std::vector<uint8_t> packedInsertZone = packInsertZone(tf.TFIZ);
-	std::vector<uint8_t> packedDataField = packDataField(tf.TFDF);
-	std::vector<uint8_t> packedOperationalControlField = packOperationalControlField(tf.OCF);
-	std::vector<uint8_t> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);
-	appendVector(packedTransferFrame, packedPrimaryHeader);
-	appendVector(packedTransferFrame, packedInsertZone);
-	appendVector(packedTransferFrame, packedDataField);
-	appendVector(packedTransferFrame, packedOperationalControlField);
-	appendVector(packedTransferFrame, packedFrameErrorControlField);
+	size_t offset = 0;
 
-	return packedTransferFrame;
+	append(packedPrimaryHeader, packed, offset);
+	append(packedInsertZone, packed, offset);
+	append(packedDataField, packed, offset);
+	append(packedOperationalControlField, packed, offset);
+	append(packedFrameErrorControlField, packed, offset);
+
+	packed.length = offset;
+
+	return packed;
 }
 
 enum MessageType {
@@ -275,9 +288,11 @@ TransferFrame DataToTransferFrame(MessageType type, std::vector<uint8_t> data) {
 }
 
 // Converts higher level input data into a stream of bytes for the physical layer
-std::vector<uint8_t> DataToStream(MessageType type, std::vector<uint8_t> data) {
+template <size_t M, size_t N> std::array<uint8_t, N> DataToStream(MessageType type, std::array<uint8_t, M> data) {
 	TransferFrame tf = DataToTransferFrame(type, data);
-	std::vector<uint8_t> packedFrame = packTransferFrame(tf);
+	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packedFrame = packTransferFrame(tf);
+	//std::array<uint8_t, packedFrame.length> serializedBytes;
+	//std::copy(packedFrame.data.begin(), packedFrame.data.begin() + packedFrame.length, serializedBytes);
 
 	return packedFrame;
 }
@@ -299,7 +314,9 @@ int main(int argc, char* argv[]) {
 	tfph.VCFrameCountLength = 2;
 	tfph.VCFrameCountField = 5;
 
-	std::vector<uint8_t> packedHeader = packPrimaryHeader(tfph);
+	BitBuffer<PRIMARY_HEADER_LENGTH> packedHeader = packPrimaryHeader(tfph);
+	std::bitset<8> b2{packedHeader.data[0]};
+	std::cout << "First byte: " << b2 << std::endl;
 	//std::cout << "Packed Header: " << std::bitset<64>(packedHeader) << std::endl;
 
 	return 0;

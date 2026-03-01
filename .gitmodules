@@ -1,0 +1,3 @@
+[submodule "USLP/USLP/CRCpp"]
+	path = USLP/USLP/CRCpp
+	url = git@github.com:d-bahr/CRCpp.git
