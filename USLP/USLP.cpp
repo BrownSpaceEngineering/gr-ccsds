@@ -19,24 +19,24 @@
 #define DATA_FIELD_HEADER_LENGTH			3
 
 // Transfer Frame Primary Header field bit positions
-#define TFVN_POS                        	0    // 4 bits
-#define SCID_POS                        	4    // 16 bits
-#define SRC_DST_ID_POS                  	20   // 1 bit
-#define VCID_POS                        	21   // 6 bits
-#define MAPID_POS                       	27   // 4 bits
-#define END_TF_PRIMARY_HEADER_FLAG_POS  	31   // 1 bit
-#define TF_LENGTH_POS                   	32   // 16 bits
-#define BYPASS_SEQ_CTRL_FLAG_POS        	48   // 1 bit
-#define PROTOCOL_CMD_CTRL_FLAG_POS      	49   // 1 bit
-#define SPARE_POS                       	50   // 2 bits
-#define OCF_FLAG_POS                    	52   // 1 bit
-#define VC_FRAME_COUNT_LENGTH_POS       	53   // 3 bits
-#define VC_FRAME_COUNT_POS        			56   // ???? bits
-// NOTE THAT WE ARE NOT CURRENTLY SET UP TO CONTAIN MORE THAN 255 FRAMES IN A VC
+#define TFVN_POS                        	60   // 4  bits
+#define SCID_POS                        	44   // 16 bits
+#define SRC_DST_ID_POS                  	43   // 1  bit 
+#define VCID_POS                        	37   // 6  bits
+#define MAPID_POS                       	33   // 4  bits
+#define END_TF_PRIMARY_HEADER_FLAG_POS  	32   // 1  bit 
+#define TF_LENGTH_POS                   	16   // 16 bits
+#define BYPASS_SEQ_CTRL_FLAG_POS        	15   // 1  bit 
+#define PROTOCOL_CMD_CTRL_FLAG_POS      	14   // 1  bit 
+#define SPARE_POS                       	12   // 2  bits
+#define OCF_FLAG_POS                    	11   // 1  bit 
+#define VC_FRAME_COUNT_LENGTH_POS       	 8   // 3  bits 
+#define VC_FRAME_COUNT_POS              	 0   // 8  bits
+// NOTE THAT WE ARE NOT CURRENTLY SET UP	 TO CONTAIN MORE THAN 255 FRAMES IN A VC
 
 // TF Primary Header structure
-#define TFDZ_CONSTRUCTION_RULES_POS			0  // 3 bits
-#define USLP_PROTOCOL_ID_POS				3  // 5 bits
+#define TFDZ_CONSTRUCTION_RULES_POS			29  // 3 bits
+#define USLP_PROTOCOL_ID_POS				24  // 5 bits
 #define FIRST_HEADER_LAST_VALID_OCTET_POS	8  // 16 bits
 
 // Fixed-size buffer structure
@@ -115,11 +115,19 @@ template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_
     return buffer;
 }
 
+void printBytes(uint64_t value) {
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&value);
+    for (int i = sizeof(uint64_t) - 1; i >= 0; --i) {
+        std::cout << static_cast<int>(bytes[i]) << " ";
+    }
+    std::cout << "\n";
+}
+
 BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph) {
     uint64_t packedHeader = 0;
 
     packedHeader |= ((uint64_t)(tfph.TFVN))                   		<< TFVN_POS;
-    packedHeader |= ((uint64_t)(tfph.SCID))                   		<< SCID_POS;
+	packedHeader |= ((uint64_t)(tfph.SCID))                   		<< SCID_POS;
     packedHeader |= ((uint64_t)(tfph.sourceOrDestinationID))  		<< SRC_DST_ID_POS;
     packedHeader |= ((uint64_t)(tfph.VCID))                   		<< VCID_POS;
     packedHeader |= ((uint64_t)(tfph.MAPID))                  		<< MAPID_POS;
@@ -131,7 +139,7 @@ BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph) {
     packedHeader |= ((uint64_t)(tfph.operationalControlFieldFlag)) 	<< OCF_FLAG_POS;
     packedHeader |= ((uint64_t)(tfph.VCFrameCountLength))    		<< VC_FRAME_COUNT_LENGTH_POS;
 	packedHeader |= ((uint64_t)(tfph.VCFrameCountField))    		<< VC_FRAME_COUNT_POS;
-
+	printBytes(packedHeader);
 	int numBytes = (tfph.endTFPrimaryHeaderFlag == 1) ? 4 : 8;
 
     return packInteger<PRIMARY_HEADER_LENGTH>(packedHeader, numBytes);
@@ -315,7 +323,7 @@ int main(int argc, char* argv[]) {
 	tfph.VCFrameCountField = 5;
 
 	BitBuffer<PRIMARY_HEADER_LENGTH> packedHeader = packPrimaryHeader(tfph);
-	std::bitset<8> b2{packedHeader.data[0]};
+	std::bitset<8> b2{packedHeader.data[7]};
 	std::cout << "First byte: " << b2 << std::endl;
 	//std::cout << "Packed Header: " << std::bitset<64>(packedHeader) << std::endl;
 
