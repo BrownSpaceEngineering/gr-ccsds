@@ -4,19 +4,31 @@
 #include <vector>
 #include <array>
 #include <cstdint>
+#include <cassert>
+#include <random>
+#include <cstring>
+#include <algorithm>
+#include <fstream>
+#include <iomanip>
 #include "CRCpp/inc/CRC.h"
+
+// Upper Level Macros
+#define MAX_MESSAGE_LENGTH					65535 // Maximum size of a message a user can send (pre-serialization)
+#define MAX_TF_PER_MESSAGE					65 // Most transfer frames we will ever use for one message
 
 // Transfer Frame Data Lengths in bytes
 #define MAX_SECURITY_HEADER_LENGTH 			20
 #define MAX_SECURITY_TRAILER_LENGTH 		20
-#define MAX_DATA_FIELD_LENGTH				1014 // Max Transfer Frame size - mandatory bytes
-#define MAX_DATA_ZONE_LENGTH				1014 // Max Transfer Frame size - mandatory bytes
+#define MAX_DATA_FIELD_LENGTH				1014 // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+#define MAX_DATA_ZONE_LENGTH				1014 // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
 #define MAX_INSERT_ZONE_LENGTH				1024 // Apparently specified to worst case take maximum TF size
 #define OCF_DATA_LENGTH 					4
 #define FECF_DATA_LENGTH 					4
 #define MAX_TRANSFER_FRAME_LENGTH 			1024
 #define PRIMARY_HEADER_LENGTH				8
 #define DATA_FIELD_HEADER_LENGTH			3
+
+constexpr int MAX_DATA_SIZE = MAX_TRANSFER_FRAME_LENGTH * MAX_TF_PER_MESSAGE;
 
 // Transfer Frame Primary Header field bit positions
 #define TFVN_POS                        	60   // 4  bits
@@ -97,6 +109,11 @@ struct TransferFrame {
 	TFDataField TFDF;
 	OperationalControlField OCF;
 	FrameErrorControlField FECF;
+};
+
+enum MessageType {
+	COMMAND = 1, 
+	BITMAP = 2
 };
 
 void appendVector(std::vector<uint8_t>& dest, const std::vector<uint8_t>& src) {
@@ -218,11 +235,6 @@ BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf) {
 	return packed;
 }
 
-enum MessageType {
-	COMMAND = 1, 
-	BITMAP = 2
-};
-
 std::array<uint8_t, 4> CRCGenerator() {
 	//To be implemented later
 	std::array<uint8_t, 4> CRC{};
@@ -236,7 +248,7 @@ TFPrimaryHeader GetPrimaryHeader(int VCID) {
 	tfph.TFVN = 4; // Just carries the current version
 	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
-	tfph.endTFPrimaryHeaderFlag;
+	tfph.endTFPrimaryHeaderFlag; // Decided possibly if we need super fast transfer of packet
 	tfph.bypassSequenceControlFlag;
 	tfph.protocolCommandControlFlag;
 	tfph.operationalControlFieldFlag; //Seems like a good safeguard to have
@@ -247,16 +259,33 @@ TFPrimaryHeader GetPrimaryHeader(int VCID) {
 	//tfph.spare = 0b00; //Decide what to do with this later
 	//tfph.SCID = 0; // Constant we decide on when the mission launches
 
+	// Test packing a Transfer Frame Primary Header (TO BE REMOVED)
+	tfph.TFVN = 4;
+	tfph.SCID = 2;
+	tfph.sourceOrDestinationID = 1;
+	tfph.VCID = 2;
+	tfph.MAPID = 0;
+	tfph.endTFPrimaryHeaderFlag = true;
+	tfph.TFLength = 512;
+	tfph.bypassSequenceControlFlag = false;
+	tfph.protocolCommandControlFlag = false;
+	tfph.spare = 0b00;
+	tfph.operationalControlFieldFlag = true;
+	tfph.VCFrameCountLength = 2;
+	tfph.VCFrameCountField = 5;
+
 	return tfph;
 }
 
 TFInsertZone GetInsertZone() {
 	TFInsertZone insertZone;
+	//std::array<uint8_t, 0> messageContainer {};
+	insertZone.TFIZData.length = 0;
 	
 	return insertZone;
 }
 
-TFDataField GetDataField(std::vector<uint8_t> data) {
+TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data) {
 	TFDataField tfdf;
 
 	return tfdf;
@@ -275,12 +304,12 @@ FrameErrorControlField GetFrameErrorControlField() {
 }
 
 // Converts higher level input data into a Transfer Frame ready for transmission
-TransferFrame DataToTransferFrame(MessageType type, std::vector<uint8_t> data) {
+TransferFrame DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LENGTH> message) {
 	int VCID = type; //either 1 or 2 depending on command or bitmap
 
 	TFPrimaryHeader tfph = GetPrimaryHeader(VCID);
 	TFInsertZone tfiz = GetInsertZone();
-	TFDataField tfdf = GetDataField(data);
+	TFDataField tfdf = GetDataField(message);
 	OperationalControlField ocf = GetOperationalControlField();
 	FrameErrorControlField fecf = GetFrameErrorControlField();
 
@@ -295,37 +324,105 @@ TransferFrame DataToTransferFrame(MessageType type, std::vector<uint8_t> data) {
 	return tf;
 }
 
-// Converts higher level input data into a stream of bytes for the physical layer
-template <size_t M, size_t N> std::array<uint8_t, N> DataToStream(MessageType type, std::array<uint8_t, M> data) {
-	TransferFrame tf = DataToTransferFrame(type, data);
-	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packedFrame = packTransferFrame(tf);
-	//std::array<uint8_t, packedFrame.length> serializedBytes;
-	//std::copy(packedFrame.data.begin(), packedFrame.data.begin() + packedFrame.length, serializedBytes);
+// (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
+uint16_t TFDataSize() {
+	return MAX_DATA_FIELD_LENGTH;
+}
 
-	return packedFrame;
+// Converts part of message into the data that will be wrapped in a transfer frame
+BitBuffer<MAX_DATA_FIELD_LENGTH> GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message) {
+	BitBuffer<MAX_DATA_FIELD_LENGTH> chunk;
+	uint16_t maxTFDataSize = TFDataSize();
+	uint16_t numBytesCopy = std::min(maxTFDataSize, static_cast<uint16_t>(message.length - messagePtr));
+	chunk.length = numBytesCopy;
+	std::memcpy(&chunk.data[0], &message.data[messagePtr], numBytesCopy);
+	messagePtr += numBytesCopy;
+	
+	return chunk;
+}
+
+// Converts higher level input data into a stream of bytes for the physical layer
+BitBuffer<MAX_DATA_SIZE> DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message) {
+	uint16_t messagePtr = 0; // with current data size limit of 65535 uint16_t works
+	uint32_t serializedDataPtr = 0;
+	BitBuffer<MAX_DATA_SIZE> serializedData;
+
+	while (messagePtr < message.length) {
+		BitBuffer<MAX_DATA_FIELD_LENGTH> chunk = GetTFDataZone(messagePtr, message);
+		TransferFrame tf = DataToTransferFrame(type, chunk);
+		BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packedFrame = packTransferFrame(tf);
+		assert(serializedDataPtr + packedFrame.length <= MAX_DATA_SIZE);
+
+		std::memcpy(&serializedData.data[serializedDataPtr], &packedFrame.data[0], packedFrame.length);
+		serializedDataPtr += packedFrame.length;
+	}
+
+	return serializedData;
+}
+
+constexpr int TEST_ARRAY_SIZE = 3042;
+
+// Generates random bytes enough to fill 3 transfer frames with maximum capacity
+std::array<uint8_t, TEST_ARRAY_SIZE> GenerateRandomBytes() {
+	std::array<uint8_t, TEST_ARRAY_SIZE> message;
+
+	/*std::generate(message.begin(), message.end(), [] {
+		static std::mt19937 gen(std::random_device{}());
+		static std::uniform_int_distribution<int> dist(0,255);
+		return dist(gen);
+	});*/
+
+	std::mt19937 gen(12345);
+	std::uniform_int_distribution dist(0, 255);
+	
+	for (auto& b: message) {
+		b = static_cast<uint8_t>(dist(gen));
+	}
+
+	return message;
+}
+
+// Writes Bytes to .txt assuming maximum transfer frame capacity
+void WriteBytes(std::array<uint8_t, TEST_ARRAY_SIZE> message) {
+	std::ofstream out("bytes.txt", std::ios::trunc);
+	int lastTFIndex = 0;
+
+	for (int i = 0; i < TEST_ARRAY_SIZE; i++) {
+		//std::bitset<8> b2{message[i]};
+		//std::cout << b2 << std::endl;
+		if (i % 1014 == 0) {
+			lastTFIndex = i;
+
+			out << "\n";
+			out << "\n";
+			out << "------ NEW TRANSFER FRAME ------";
+			out << "\n";
+			out << "\n";
+		}
+
+		if ((i - lastTFIndex) % 32 == 0) {
+			out << "\n";
+		}
+
+		out << std::setw(3) << static_cast<int>(message[i]) << "  ";
+	}
 }
 
 int main(int argc, char* argv[]) {
-	// Test packing a Transfer Frame Primary Header
-	TFPrimaryHeader tfph;
-	tfph.TFVN = 4;
-	tfph.SCID = 2;
-	tfph.sourceOrDestinationID = 1;
-	tfph.VCID = 2;
-	tfph.MAPID = 0;
-	tfph.endTFPrimaryHeaderFlag = true;
-	tfph.TFLength = 512;
-	tfph.bypassSequenceControlFlag = false;
-	tfph.protocolCommandControlFlag = false;
-	tfph.spare = 0b00;
-	tfph.operationalControlFieldFlag = true;
-	tfph.VCFrameCountLength = 2;
-	tfph.VCFrameCountField = 5;
+	std::array<uint8_t, TEST_ARRAY_SIZE> message = GenerateRandomBytes();
+	WriteBytes(message);
 
-	BitBuffer<PRIMARY_HEADER_LENGTH> packedHeader = packPrimaryHeader(tfph);
-	std::bitset<8> b2{packedHeader.data[7]};
-	std::cout << "First byte: " << b2 << std::endl;
+	//BitBuffer<PRIMARY_HEADER_LENGTH> packedHeader = packPrimaryHeader(tfph);
+	//std::bitset<8> b2{packedHeader.data[7]};
+	//std::cout << "First byte: " << b2 << std::endl;
 	//std::cout << "Packed Header: " << std::bitset<64>(packedHeader) << std::endl;
+
+	enum MessageType type = BITMAP;
+	std::array<uint8_t, MAX_MESSAGE_LENGTH> messageContainer {};
+	std::memcpy(&messageContainer[0], &message[0], message.size());
+
+	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer {messageContainer, TEST_ARRAY_SIZE};
+	BitBuffer<MAX_DATA_SIZE> Result = DataToStream(type, messageBuffer);
 
 	return 0;
 }
