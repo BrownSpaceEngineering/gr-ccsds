@@ -24,7 +24,7 @@ void printBytes(uint64_t value) {
 
 std::array<uint8_t, 4> CRCGenerator() {
 	//To be implemented later
-	std::array<uint8_t, 4> CRC{};
+	std::array<uint8_t, 4> CRC{4, 0, 5, 0};
 
 	return CRC;
 }
@@ -57,7 +57,7 @@ void WriteBytes(std::array<uint8_t, TEST_ARRAY_SIZE> message) {
 	for (int i = 0; i < TEST_ARRAY_SIZE; i++) {
 		//std::bitset<8> b2{message[i]};
 		//std::cout << b2 << std::endl;
-		if (i % 1014 == 0) {
+		if (i % 1003 == 0) {
 			lastTFIndex = i;
 
 			out << "\n";

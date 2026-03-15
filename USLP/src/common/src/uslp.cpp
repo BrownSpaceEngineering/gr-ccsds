@@ -39,7 +39,7 @@ TFPrimaryHeader GetPrimaryHeader(int VCID) {
 	tfph.sourceOrDestinationID = 1;
 	tfph.VCID = 2;
 	tfph.MAPID = 0;
-	tfph.endTFPrimaryHeaderFlag = true;
+	tfph.endTFPrimaryHeaderFlag = false;
 	tfph.TFLength = 512;
 	tfph.bypassSequenceControlFlag = false;
 	tfph.protocolCommandControlFlag = false;
@@ -53,28 +53,64 @@ TFPrimaryHeader GetPrimaryHeader(int VCID) {
 
 TFInsertZone GetInsertZone() {
 	TFInsertZone insertZone;
-	//std::array<uint8_t, 0> messageContainer {};
-	insertZone.TFIZData.length = 0;
+	BitBuffer<MAX_INSERT_ZONE_LENGTH> data;
+	data.data = {2, 3};
+	data.length = 2;
+	insertZone.TFIZData = data;
 	
 	return insertZone;
 }
 
-//TFDataField GetSecurityHeader();
+// Current assumption is no SDLS (will edit later)
+BitBuffer<MAX_SECURITY_HEADER_LENGTH> GetSecurityHeader() {
+	std::array<uint8_t, MAX_SECURITY_HEADER_LENGTH> data {};
+	
+	BitBuffer<MAX_SECURITY_HEADER_LENGTH> header;
+	header.data = data;
+	header.length = 0;
+
+	return header;
+};
+
+// Current assumption is no SDLS (will edit later)
+BitBuffer<MAX_SECURITY_TRAILER_LENGTH> GetSecurityTrailer() {
+	std::array<uint8_t, MAX_SECURITY_TRAILER_LENGTH> data {};
+	
+	BitBuffer<MAX_SECURITY_TRAILER_LENGTH> trailer;
+	trailer.data = data;
+	trailer.length = 0;
+
+	return trailer;
+};
 
 TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data) {
 	TFDataField tfdf;
+	tfdf.securityHeader = GetSecurityHeader();
+
+	// Placeholder values
+	TFDFHeader header {6, 0, 2};
+	tfdf.header = header;
+	tfdf.TFDZ = data;
+	tfdf.securityTrailer = GetSecurityTrailer();
+	//std::cout << "security trailer length on init: " << tfdf.securityTrailer.length << std::endl;
 
 	return tfdf;
 }
 
 OperationalControlField GetOperationalControlField() {
 	OperationalControlField ocf;
+	ocf.SDUType = 0;
+	ocf.OCFData = 0;
 
 	return ocf;
 }
 
 FrameErrorControlField GetFrameErrorControlField() {
-	FrameErrorControlField fecf {CRCGenerator()};
+	BitBuffer<FECF_DATA_LENGTH> FECFData;
+	FECFData.data = CRCGenerator();
+	FECFData.length = 4;
+
+	FrameErrorControlField fecf {FECFData};
 
 	return fecf;
 }
@@ -102,7 +138,8 @@ TransferFrame DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LEN
 
 // (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
 uint16_t TFDataSize() {
-	return MAX_DATA_FIELD_LENGTH;
+	return 1003;
+	//return MAX_DATA_FIELD_LENGTH;
 }
 
 // Converts part of message into the data that will be wrapped in a transfer frame
@@ -124,21 +161,32 @@ BitBuffer<MAX_DATA_SIZE> DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LE
 	BitBuffer<MAX_DATA_SIZE> serializedData;
 
 	while (messagePtr < message.length) {
+		//std::cout << "getting DZ" << std::endl;
 		BitBuffer<MAX_DATA_FIELD_LENGTH> chunk = GetTFDataZone(messagePtr, message);
+		//std::cout << "making TF" << std::endl;
 		TransferFrame tf = DataToTransferFrame(type, chunk);
+		//std::cout << "pack" << std::endl;
 		BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packedFrame = packTransferFrame(tf);
-		assert(serializedDataPtr + packedFrame.length <= MAX_DATA_SIZE);
+		//std::cout << "packed" << std::endl;
+		for (int i = 0; i < 8; i++) {
+			std::bitset<8> b{packedFrame.data[i]};
+			std::cout << b << " ";
+		}
+		std::cout << "\n";
 
+		assert(serializedDataPtr + packedFrame.length <= MAX_DATA_SIZE);
 		std::memcpy(&serializedData.data[serializedDataPtr], &packedFrame.data[0], packedFrame.length);
 		serializedDataPtr += packedFrame.length;
 	}
+
+	serializedData.length = serializedDataPtr;
 
 	return serializedData;
 }
 
 int main(int argc, char* argv[]) {
 	std::array<uint8_t, TEST_ARRAY_SIZE> message = GenerateRandomBytes();
-	WriteBytes(message);
+	WriteBytes(message); // Writes raw bytes of message to bytes.txt
 
 	//BitBuffer<PRIMARY_HEADER_LENGTH> packedHeader = packPrimaryHeader(tfph);
 	//std::bitset<8> b2{packedHeader.data[7]};
@@ -150,7 +198,31 @@ int main(int argc, char* argv[]) {
 	std::memcpy(&messageContainer[0], &message[0], message.size());
 
 	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer {messageContainer, TEST_ARRAY_SIZE};
-	BitBuffer<MAX_DATA_SIZE> Result = DataToStream(type, messageBuffer);
+	BitBuffer<MAX_DATA_SIZE> serializedTransferFrames = DataToStream(type, messageBuffer);
+
+	std::ofstream out("Transfer Frames.txt", std::ios::trunc);
+	int lastTFIndex = 0;
+
+	// Writes transfer frame bytes wrapping message
+	for (int i = 0; i < TEST_ARRAY_SIZE; i++) {
+		//std::bitset<8> b2{message[i]};
+		//std::cout << b2 << std::endl;
+		if (i % 1024 == 0) {
+			lastTFIndex = i;
+
+			out << "\n";
+			out << "\n";
+			out << "------ NEW TRANSFER FRAME ------";
+			out << "\n";
+			out << "\n";
+		}
+
+		if ((i - lastTFIndex) % 32 == 0) {
+			out << "\n";
+		}
+
+		out << std::setw(3) << static_cast<int>(serializedTransferFrames.data[i]) << "  ";
+	}
 
 	return 0;
 }

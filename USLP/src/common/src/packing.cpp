@@ -53,19 +53,30 @@ BitBuffer<MAX_INSERT_ZONE_LENGTH> packInsertZone(TFInsertZone tfiz) {
 };
 
 BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh) {
-    uint32_t packed = 0;
+    uint64_t packed = 0;
 
-    packed |= ((uint32_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
-    packed |= ((uint32_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;
-    packed |= ((uint32_t)(tfdfh.FirstHeaderLastValidOctetPointer))  << FIRST_HEADER_LAST_VALID_OCTET_POS;
+    packed |= ((uint64_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
+    packed |= ((uint64_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;
+    packed |= ((uint64_t)(tfdfh.FirstHeaderLastValidOctetPointer))  << FIRST_HEADER_LAST_VALID_OCTET_POS;
 
 	int numBytes = DATA_FIELD_HEADER_LENGTH;
 
-    return packInteger<DATA_FIELD_HEADER_LENGTH>(packed, numBytes);
+    BitBuffer<DATA_FIELD_HEADER_LENGTH> packedDataFieldHeader = packInteger<DATA_FIELD_HEADER_LENGTH>(packed, numBytes);
+    
+    std::cout << packed << std::endl;
+    std::cout << "packed data field header:" << std::endl;
+    for (int i = 0; i < 3; i++) {
+        std::bitset<8> b{packedDataFieldHeader.data[i]};
+        std::cout << b << " ";
+    }
+    std::cout << std::endl;
+
+    return packedDataFieldHeader;
 }
 
 BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf) {
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packed;
+    //std::cout << "pack header" << std::endl;
     BitBuffer<3> packedHeader = packDataFieldHeader(tfdf.header);
     size_t offset = 0;
 
@@ -95,10 +106,20 @@ BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fe
 
 BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf) {
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packed;
+    //std::cout << "packPrimary" << std::endl;
 	BitBuffer<PRIMARY_HEADER_LENGTH> packedPrimaryHeader = packPrimaryHeader(tf.TFPH);
+    std::cout << "packedParimaryHeader" << std::endl;
+    for (int i = 0; i < 8; i++) {
+        std::bitset<8> b{packedPrimaryHeader.data[i]};
+        std::cout << b << " ";
+    }
+    std::cout << "\n";
 	BitBuffer<MAX_INSERT_ZONE_LENGTH> packedInsertZone = packInsertZone(tf.TFIZ);
+    //std::cout << "packData" << std::endl;
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packedDataField = packDataField(tf.TFDF);
+    //std::cout << "pack Op" << std::endl;
 	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF);
+    //std::cout << "pack Error" << std::endl;
 	BitBuffer<FECF_DATA_LENGTH> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);
 
 	size_t offset = 0;

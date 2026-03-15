@@ -48,9 +48,9 @@ constexpr int MAX_DATA_SIZE = MAX_TRANSFER_FRAME_LENGTH * MAX_TF_PER_MESSAGE;
 // NOTE THAT WE ARE NOT CURRENTLY SET UP	 TO CONTAIN MORE THAN 255 FRAMES IN A VC
 
 // TF Primary Header structure
-#define TFDZ_CONSTRUCTION_RULES_POS			29  // 3 bits
-#define USLP_PROTOCOL_ID_POS				24  // 5 bits
-#define FIRST_HEADER_LAST_VALID_OCTET_POS	8  // 16 bits
+#define TFDZ_CONSTRUCTION_RULES_POS			21  // 3 bits
+#define USLP_PROTOCOL_ID_POS				16  // 5 bits
+#define FIRST_HEADER_LAST_VALID_OCTET_POS	0  // 16 bits
 
 // Fixed-size buffer structure
 template <size_t Capacity>

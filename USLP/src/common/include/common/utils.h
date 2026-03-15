@@ -13,7 +13,7 @@
 #include <fstream>
 #include <iomanip>
 
-constexpr int TEST_ARRAY_SIZE = 3042;
+constexpr int TEST_ARRAY_SIZE = 3009;
 
 void printBytes(uint64_t value);
 template <size_t M, size_t N> void append(const BitBuffer<M>& src, BitBuffer<N>& dest, size_t& offset);
