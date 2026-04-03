@@ -43,8 +43,8 @@ struct USLPConfig {
         uint8_t TFVN = 0b1100;                     // USLP-116
         uint8_t MCMultiplexingScheme;              // USLP-117
         bool insertZonePresent;                    // USLP-118
-        uint16_t insertZoneLength;                 // USLP-119 (length 1-65514)
-        bool fecfPresent = true;                   // USLP-120
+        uint16_t insertZoneLength = 0;             // USLP-119 (length 1-65514 (set to 0 since not using insert service))
+        bool FECFPresent = true;                   // USLP-120
         uint32_t maxTFPerDataUnit;                 // USLP-122 (Maximum Number of Transfer Frames Given to the Coding and Synchronization Sublayer as a single data unit)
         uint32_t maxRepetitions;                   // USLP-123 (Maximum Value of the Repetitions Parameter to the Coding and Synchronization Sublayer)
     };
@@ -73,13 +73,13 @@ struct USLPConfig {
         uint16_t truncatedFrameLength;             // USLP-137 (I do not understand what is being truncated)
         SDUType SDUType;                           // USLP-138 (Data field content, which can carry our desired messages or other services)
 
-        bool ocfAllowed;                           // USLP-139 (variable-length TF)
-        bool ocfRequired;                          // USLP-140 (fixed-length TF)
+        bool OCFAllowed;                           // USLP-139 (variable-length TF)
+        bool OCFRequired;                          // USLP-140 (fixed-length TF)
 
         uint32_t seqControlledRepetitions;         // USLP-141 (No idea about this)
         uint32_t copControlRepetitions;            // USLP-142 (No idea about this)
 
-        uint32_t tfdfCompletionTimeoutMs;          // USLP-143 (Max milliseconds from start to releasing)
+        uint32_t TFDFCompletionTimeoutMs;          // USLP-143 (Max milliseconds from start to releasing)
         uint32_t interFrameDelayMs;                // USLP-144 (Max milliseconds between releases of successive frames)
     };
 
@@ -103,16 +103,23 @@ struct USLPConfig {
     PacketTransfer packet;
 };
 
-TFPrimaryHeader GetPrimaryHeader(int VCID);
-TFInsertZone GetInsertZone();
-TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data);
-OperationalControlField GetOperationalControlField();
-FrameErrorControlField GetFrameErrorControlField();
-// Converts higher level input data into a Transfer Frame ready for transmission
-TransferFrame DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LENGTH> message);
-// (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
-uint16_t TFDataSize();
-// Converts part of message into the data that will be wrapped in a transfer frame
-BitBuffer<MAX_DATA_FIELD_LENGTH> GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message);
-// Converts higher level input data into a stream of bytes for the physical layer
-BitBuffer<MAX_DATA_SIZE> DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message);
+class USLP {
+public:
+    TFPrimaryHeader GetPrimaryHeader(int VCID);
+    TFInsertZone GetInsertZone();
+    BitBuffer<MAX_SECURITY_HEADER_LENGTH> GetSecurityHeader();
+    BitBuffer<MAX_SECURITY_TRAILER_LENGTH> GetSecurityTrailer();
+    TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data);
+    OperationalControlField GetOperationalControlField();
+    FrameErrorControlField GetFrameErrorControlField();
+    // Converts higher level input data into a Transfer Frame ready for transmission
+    TransferFrame DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LENGTH> message);
+    // (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
+    uint16_t TFDataSize();
+    // Converts part of message into the data that will be wrapped in a transfer frame
+    BitBuffer<MAX_DATA_FIELD_LENGTH> GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message);
+    // Converts higher level input data into a stream of bytes for the physical layer
+    BitBuffer<MAX_DATA_SIZE> DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message);
+
+    USLPConfig ManagedParams;
+};

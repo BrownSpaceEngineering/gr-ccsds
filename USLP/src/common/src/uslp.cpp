@@ -16,10 +16,10 @@
 #include <common/packing.h>
 #include "CRC.h"
 
-TFPrimaryHeader GetPrimaryHeader(int VCID) {
+TFPrimaryHeader USLP::GetPrimaryHeader(int VCID) {
 	TFPrimaryHeader tfph;
 	tfph.protocolCommandControlFlag = false; //Until we work on COP
-	tfph.TFVN = 4; // Just carries the current version
+	tfph.TFVN = ManagedParams.physical.TFVN; // Just carries the current version
 	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
 	tfph.endTFPrimaryHeaderFlag; // Decided possibly if we need super fast transfer of packet
@@ -51,7 +51,7 @@ TFPrimaryHeader GetPrimaryHeader(int VCID) {
 	return tfph;
 }
 
-TFInsertZone GetInsertZone() {
+TFInsertZone USLP::GetInsertZone() {
 	TFInsertZone insertZone;
 	BitBuffer<MAX_INSERT_ZONE_LENGTH> data;
 	data.data = {2, 3};
@@ -62,7 +62,7 @@ TFInsertZone GetInsertZone() {
 }
 
 // Current assumption is no SDLS (will edit later)
-BitBuffer<MAX_SECURITY_HEADER_LENGTH> GetSecurityHeader() {
+BitBuffer<MAX_SECURITY_HEADER_LENGTH> USLP::GetSecurityHeader() {
 	std::array<uint8_t, MAX_SECURITY_HEADER_LENGTH> data {};
 	
 	BitBuffer<MAX_SECURITY_HEADER_LENGTH> header;
@@ -73,7 +73,7 @@ BitBuffer<MAX_SECURITY_HEADER_LENGTH> GetSecurityHeader() {
 };
 
 // Current assumption is no SDLS (will edit later)
-BitBuffer<MAX_SECURITY_TRAILER_LENGTH> GetSecurityTrailer() {
+BitBuffer<MAX_SECURITY_TRAILER_LENGTH> USLP::GetSecurityTrailer() {
 	std::array<uint8_t, MAX_SECURITY_TRAILER_LENGTH> data {};
 	
 	BitBuffer<MAX_SECURITY_TRAILER_LENGTH> trailer;
@@ -83,7 +83,7 @@ BitBuffer<MAX_SECURITY_TRAILER_LENGTH> GetSecurityTrailer() {
 	return trailer;
 };
 
-TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data) {
+TFDataField USLP::GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data) {
 	TFDataField tfdf;
 	tfdf.securityHeader = GetSecurityHeader();
 
@@ -97,7 +97,7 @@ TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data) {
 	return tfdf;
 }
 
-OperationalControlField GetOperationalControlField() {
+OperationalControlField USLP::GetOperationalControlField() {
 	OperationalControlField ocf;
 	ocf.SDUType = 0;
 	ocf.OCFData = 0;
@@ -105,7 +105,7 @@ OperationalControlField GetOperationalControlField() {
 	return ocf;
 }
 
-FrameErrorControlField GetFrameErrorControlField() {
+FrameErrorControlField USLP::GetFrameErrorControlField() {
 	BitBuffer<FECF_DATA_LENGTH> FECFData;
 	FECFData.data = CRCGenerator();
 	FECFData.length = 4;
@@ -116,7 +116,7 @@ FrameErrorControlField GetFrameErrorControlField() {
 }
 
 // Converts higher level input data into a Transfer Frame ready for transmission
-TransferFrame DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LENGTH> message) {
+TransferFrame USLP::DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LENGTH> message) {
 	int VCID = type; //either 1 or 2 depending on command or bitmap
 
 	TFPrimaryHeader tfph = GetPrimaryHeader(VCID);
@@ -137,13 +137,13 @@ TransferFrame DataToTransferFrame(MessageType type, BitBuffer<MAX_DATA_FIELD_LEN
 }
 
 // (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
-uint16_t TFDataSize() {
+uint16_t USLP::TFDataSize() {
 	return 1003;
 	//return MAX_DATA_FIELD_LENGTH;
 }
 
 // Converts part of message into the data that will be wrapped in a transfer frame
-BitBuffer<MAX_DATA_FIELD_LENGTH> GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message) {
+BitBuffer<MAX_DATA_FIELD_LENGTH> USLP::GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message) {
 	BitBuffer<MAX_DATA_FIELD_LENGTH> chunk;
 	uint16_t maxTFDataSize = TFDataSize();
 	uint16_t numBytesCopy = std::min(maxTFDataSize, static_cast<uint16_t>(message.length - messagePtr));
@@ -155,19 +155,16 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> GetTFDataZone(uint16_t &messagePtr, BitBuffer<M
 }
 
 // Converts higher level input data into a stream of bytes for the physical layer
-BitBuffer<MAX_DATA_SIZE> DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message) {
+BitBuffer<MAX_DATA_SIZE> USLP::DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message) {
 	uint16_t messagePtr = 0; // with current data size limit of 65535 uint16_t works
 	uint32_t serializedDataPtr = 0;
 	BitBuffer<MAX_DATA_SIZE> serializedData;
 
 	while (messagePtr < message.length) {
-		//std::cout << "getting DZ" << std::endl;
 		BitBuffer<MAX_DATA_FIELD_LENGTH> chunk = GetTFDataZone(messagePtr, message);
-		//std::cout << "making TF" << std::endl;
 		TransferFrame tf = DataToTransferFrame(type, chunk);
-		//std::cout << "pack" << std::endl;
 		BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packedFrame = packTransferFrame(tf);
-		//std::cout << "packed" << std::endl;
+		
 		for (int i = 0; i < 8; i++) {
 			std::bitset<8> b{packedFrame.data[i]};
 			std::cout << b << " ";
@@ -196,9 +193,10 @@ int main(int argc, char* argv[]) {
 	enum MessageType type = BITMAP;
 	std::array<uint8_t, MAX_MESSAGE_LENGTH> messageContainer {};
 	std::memcpy(&messageContainer[0], &message[0], message.size());
+	USLP uslp;
 
 	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer {messageContainer, TEST_ARRAY_SIZE};
-	BitBuffer<MAX_DATA_SIZE> serializedTransferFrames = DataToStream(type, messageBuffer);
+	BitBuffer<MAX_DATA_SIZE> serializedTransferFrames = uslp.DataToStream(type, messageBuffer);
 
 	std::ofstream out("Transfer Frames.txt", std::ios::trunc);
 	int lastTFIndex = 0;
