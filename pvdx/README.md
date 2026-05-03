@@ -7,10 +7,9 @@ of formats and serialization/deserialization of the
 Pervoskite Visual Degradation eXperiment (PVDX) CubeSat's
 internal uplink/downlink communications format.
 
-Formats are only specified for UHF half-duplex communications
+Formats are only specified for UHF communications
 marked as **non-image transfer frames.** Image transfer frames
-are handled by CFDP and are packetized as pure data below SPP,
-to be processed after file transfer completion.
+are handled by CFDP class 2 and are packetized as pure data below SPP.
 
 All messages sent between PVDX and the PVDX ground station
 are expected to follow specified formats or should be considered malformed.
