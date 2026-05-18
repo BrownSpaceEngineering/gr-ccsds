@@ -18,13 +18,16 @@
 #define MAX_TF_PER_MESSAGE					65 // Most transfer frames we will ever use for one message
 
 // Transfer Frame Data Lengths in bytes
+#define ZERO								0
 #define MAX_SECURITY_HEADER_LENGTH 			20
 #define MAX_SECURITY_TRAILER_LENGTH 		20
 #define MAX_DATA_FIELD_LENGTH				1014 // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
 #define MAX_DATA_ZONE_LENGTH				1014 // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
 #define MAX_INSERT_ZONE_LENGTH				1024 // Apparently specified to worst case take maximum TF size
 #define OCF_DATA_LENGTH 					4
-#define FECF_DATA_LENGTH 					4
+#define CRC16_DATA_LENGTH 					2
+#define CRC32_DATA_LENGTH 					4
+#define FECF_DATA_LENGTH 					4 // Default FECF using CRC32
 #define MAX_TRANSFER_FRAME_LENGTH 			1024
 #define PRIMARY_HEADER_LENGTH				8
 #define DATA_FIELD_HEADER_LENGTH			3
@@ -113,6 +116,6 @@ struct TransferFrame {
 };
 
 enum MessageType {
-	COMMAND = 1, 
-	BITMAP = 2
+	COMMAND = 0, 
+	BITMAP = 1
 };

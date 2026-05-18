@@ -14,7 +14,7 @@
 #include <common/utils.h>
 #include <common/packing.h>
 
-template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_t numBytes) {
+template <size_t Capacity> BitBuffer<Capacity> USLPPacker::packInteger(uint64_t value, size_t numBytes) {
     BitBuffer<Capacity> buffer;
     buffer.length = numBytes;
 
@@ -26,7 +26,7 @@ template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_
     return buffer;
 }
 
-BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph) {
+BitBuffer<PRIMARY_HEADER_LENGTH> USLPPacker::packPrimaryHeader(TFPrimaryHeader tfph) {
     uint64_t packedHeader = 0;
 
     packedHeader |= ((uint64_t)(tfph.TFVN))                   		<< TFVN_POS;
@@ -42,17 +42,23 @@ BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph) {
     packedHeader |= ((uint64_t)(tfph.operationalControlFieldFlag)) 	<< OCF_FLAG_POS;
     packedHeader |= ((uint64_t)(tfph.VCFrameCountLength))    		<< VC_FRAME_COUNT_LENGTH_POS;
 	packedHeader |= ((uint64_t)(tfph.VCFrameCountField))    		<< VC_FRAME_COUNT_POS;
-	printBytes(packedHeader);
+	//printBytes(packedHeader);
 	int numBytes = (tfph.endTFPrimaryHeaderFlag == 1) ? 4 : 8;
 
     return packInteger<PRIMARY_HEADER_LENGTH>(packedHeader, numBytes);
 }
 
-BitBuffer<MAX_INSERT_ZONE_LENGTH> packInsertZone(TFInsertZone tfiz) {
-    return tfiz.TFIZData;
+BitBuffer<MAX_INSERT_ZONE_LENGTH> USLPPacker::packInsertZone(TFInsertZone tfiz) {
+    if (managedParams.physical.insertZonePresent) {
+        return tfiz.TFIZData;
+    } else {
+        BitBuffer<MAX_INSERT_ZONE_LENGTH> TFIZData {};
+
+        return TFIZData;
+    }
 };
 
-BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh) {
+BitBuffer<DATA_FIELD_HEADER_LENGTH> USLPPacker::packDataFieldHeader(TFDFHeader tfdfh) {
     uint64_t packed = 0;
 
     packed |= ((uint64_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
@@ -61,20 +67,20 @@ BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh) {
 
 	int numBytes = DATA_FIELD_HEADER_LENGTH;
 
-    BitBuffer<DATA_FIELD_HEADER_LENGTH> packedDataFieldHeader = packInteger<DATA_FIELD_HEADER_LENGTH>(packed, numBytes);
+    BitBuffer<DATA_FIELD_HEADER_LENGTH> packedDataFieldHeader = USLPPacker::packInteger<DATA_FIELD_HEADER_LENGTH>(packed, numBytes);
     
-    std::cout << packed << std::endl;
-    std::cout << "packed data field header:" << std::endl;
+    //std::cout << packed << std::endl;
+    //std::cout << "packed data field header:" << std::endl;
     for (int i = 0; i < 3; i++) {
         std::bitset<8> b{packedDataFieldHeader.data[i]};
-        std::cout << b << " ";
+        //std::cout << b << " ";
     }
-    std::cout << std::endl;
+    //std::cout << std::endl;
 
     return packedDataFieldHeader;
 }
 
-BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf) {
+BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField tfdf) {
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packed;
     //std::cout << "pack header" << std::endl;
     BitBuffer<3> packedHeader = packDataFieldHeader(tfdf.header);
@@ -90,36 +96,45 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf) {
     return packed;
 }
 
-BitBuffer<OCF_DATA_LENGTH> packOperationalControlField(OperationalControlField ocf) {
-	uint32_t packed = 0;
+BitBuffer<OCF_DATA_LENGTH> USLPPacker::packOperationalControlField(OperationalControlField ocf, USLPContext context) {
+	if (managedParams.virtualChannels[context.currentVCID].COPInEffect != USLPConfig::COPType::NONE) {
+        uint32_t packed = 0;
 
-    packed |= ((uint32_t)(ocf.SDUType)) << 29;
-    packed |= ((uint32_t)(ocf.OCFData));
-	int numBytes = OCF_DATA_LENGTH;
+        packed |= ((uint32_t)(ocf.SDUType)) << 29;
+        packed |= ((uint32_t)(ocf.OCFData));
+        int numBytes = OCF_DATA_LENGTH;
 
-    return packInteger<OCF_DATA_LENGTH>(packed, numBytes);
+        return packInteger<OCF_DATA_LENGTH>(packed, numBytes);
+    } else {
+        BitBuffer<OCF_DATA_LENGTH> OCFData {};
+
+        return OCFData;
+    }
 }
 
-BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fecf) {
-    return fecf.FECFData;
+BitBuffer<FECF_DATA_LENGTH> USLPPacker::packFrameErrorControlField(FrameErrorControlField fecf) {
+    if (managedParams.physical.FECFPresent) {
+        return fecf.FECFData;
+    } else {
+        BitBuffer<FECF_DATA_LENGTH> FECFData {};
+
+        return FECFData;
+    }
 }
 
-BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf) {
+BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame tf, USLPContext context) {
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packed;
     //std::cout << "packPrimary" << std::endl;
 	BitBuffer<PRIMARY_HEADER_LENGTH> packedPrimaryHeader = packPrimaryHeader(tf.TFPH);
-    std::cout << "packedParimaryHeader" << std::endl;
+    //std::cout << "packedParimaryHeader" << std::endl;
     for (int i = 0; i < 8; i++) {
         std::bitset<8> b{packedPrimaryHeader.data[i]};
-        std::cout << b << " ";
+        //std::cout << b << " ";
     }
-    std::cout << "\n";
+    //std::cout << "\n";
 	BitBuffer<MAX_INSERT_ZONE_LENGTH> packedInsertZone = packInsertZone(tf.TFIZ);
-    //std::cout << "packData" << std::endl;
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packedDataField = packDataField(tf.TFDF);
-    //std::cout << "pack Op" << std::endl;
-	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF);
-    //std::cout << "pack Error" << std::endl;
+	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF, context);
 	BitBuffer<FECF_DATA_LENGTH> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);
 
 	size_t offset = 0;

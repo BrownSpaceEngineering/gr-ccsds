@@ -12,12 +12,21 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <common/uslpstructs.h>
 
-template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_t numBytes);
-BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph);
-BitBuffer<MAX_INSERT_ZONE_LENGTH> packInsertZone(TFInsertZone tfiz);
-BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh);
-BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf);
-BitBuffer<OCF_DATA_LENGTH> packOperationalControlField(OperationalControlField ocf);
-BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fecf);
-BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf);
+class USLPPacker {
+public:
+    USLPPacker(USLPConfig& config) : managedParams(config) {}
+
+    template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_t numBytes);
+    BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph);
+    BitBuffer<MAX_INSERT_ZONE_LENGTH> packInsertZone(TFInsertZone tfiz);
+    BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh);
+    BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf);
+    BitBuffer<OCF_DATA_LENGTH> packOperationalControlField(OperationalControlField ocf, USLPContext context);
+    BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fecf);
+    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf, USLPContext context);
+
+private:
+    USLPConfig& managedParams;
+};
