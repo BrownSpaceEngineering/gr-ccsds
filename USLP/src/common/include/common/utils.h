@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
 
 constexpr int TEST_ARRAY_SIZE = 3009;
 
@@ -27,4 +30,37 @@ void WriteBytes(std::array<uint8_t, TEST_ARRAY_SIZE> message);
 template <size_t M, size_t N> void append(const BitBuffer<M>& src, BitBuffer<N>& dest, size_t& offset) {
 	std::memcpy(&dest.data[offset], &src.data[0], src.length);
 	offset += src.length;
+};
+
+template <typename T>
+class ThreadSafeQueue {
+private:
+    std::queue<T> m_queue;
+    std::mutex m_mutex;
+    std::condition_variable m_cond;
+
+public:
+    void push(T&& value) {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            // Move the object into the underlying container
+            m_queue.push(std::move(value));
+        }
+        m_cond.notify_one(); // Wake up the multiplexing thread
+    }
+
+    bool pop(T& value) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        // Wait until there is data in the queue
+        m_cond.wait(lock, [this] { return !m_queue.empty(); });
+        
+        value = std::move(m_queue.front());
+        m_queue.pop();
+        return true;
+    }
+    
+    bool empty() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_queue.empty();
+    }
 };

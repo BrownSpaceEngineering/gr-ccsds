@@ -14,7 +14,7 @@
 #include <common/utils.h>
 #include <common/uslp.h>
 #include <common/packing.h>
-#include "CRC.h"
+//#include "CRC.h"
 
 TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	TFPrimaryHeader tfph;
@@ -86,7 +86,7 @@ BitBuffer<MAX_SECURITY_TRAILER_LENGTH> USLP::GetSecurityTrailer() {
 	return trailer;
 };
 
-TFDataField USLP::GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data) {
+TFDataField USLP::GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data, uint32_t GVCID) {
 	TFDataField tfdf;
 	//tfdf.securityHeader = GetSecurityHeader();
 
@@ -126,7 +126,7 @@ FrameErrorControlField USLP::GetFrameErrorControlField() {
 }
 
 // Converts higher level input data into a Transfer Frame ready for transmission
-TransferFrame USLP::DataToTransferFrame(uint8_t VCID, BitBuffer<MAX_DATA_FIELD_LENGTH> message, USLPContext context) {
+/*TransferFrame USLP::DataToTransferFrame(uint8_t VCID, BitBuffer<MAX_DATA_FIELD_LENGTH> message, USLPContext context) {
 	TFPrimaryHeader tfph = GetPrimaryHeader(VCID);
 	TFInsertZone tfiz = GetInsertZone();
 	TFDataField tfdf = GetDataField(message);
@@ -142,10 +142,10 @@ TransferFrame USLP::DataToTransferFrame(uint8_t VCID, BitBuffer<MAX_DATA_FIELD_L
 	tf.FECF = fecf;
 
 	return tf;
-}
+}*/
 
 // (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
-uint16_t USLP::TFDataSize(uint8_t vcid) {
+/*uint16_t USLP::TFDataSize(uint8_t vcid) {
 	uint16_t num_bytes = MAX_TRANSFER_FRAME_LENGTH - PRIMARY_HEADER_LENGTH;
 	std::cout << "1" << std::endl;
 	if (managedParams.physical.FECFPresent) {
@@ -167,9 +167,10 @@ uint16_t USLP::TFDataSize(uint8_t vcid) {
 	std::cout << "4" << std::endl;
 	return num_bytes;
 	//return MAX_DATA_FIELD_LENGTH;
-}
+}*/
 
 // Converts part of message into the data that will be wrapped in a transfer frame
+/*
 BitBuffer<MAX_DATA_FIELD_LENGTH> USLP::GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message, USLPContext context) {
 	BitBuffer<MAX_DATA_FIELD_LENGTH> chunk;
 	uint16_t maxTFDataSize = maxDataZoneLengths[context.currentVCID];
@@ -179,10 +180,176 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> USLP::GetTFDataZone(uint16_t &messagePtr, BitBu
 	messagePtr += numBytesCopy;
 	
 	return chunk;
+}*/
+
+// TO-DO: Checks with SANA registry
+bool USLP::IsValidPVN(uint8_t PVN) {
+	return true;
+}
+
+void USLP::VCPRequest(
+        BitBuffer<MAX_MESSAGE_LENGTH> packet, 
+        uint32_t GVCID,
+        uint8_t PVN,
+        uint32_t SDU_ID,
+        ServiceType serviceType) {
+	if (!IsValidPVN(PVN)) return;
+
+	uint8_t VCID = static_cast<uint8_t>(VC_BITMASK & GVCID);
+
+	if (VCID < VC_COUNT) {
+		VirtualChannelAccumulator& accumulator = virtualChannels[VCID].accumulator;
+		accumulator.processIncomingPacket(packet, GVCID);
+	}
+}
+
+// Handles both wrapping packets in Transfer Frames and Multiplexing finished Transfer Frames
+void USLP::VCPacketThread() {
+	constexpr auto TICK_RATE = std::chrono::milliseconds(20);
+	constexpr uint16_t DEFAULT_FHP = 2047;
+
+	while (m_running) {
+		auto nextTick = std::chrono::steady_clock::now() + TICK_RATE;
+		bool frameGeneratedThisTick = false;
+
+		for (size_t vc = 0; vc < VC_COUNT; vc++) {
+			VirtualChannelAccumulator& acc = virtualChannels[vc].accumulator;
+			auto timeSinceFrame = std::chrono::steady_clock::now() - acc.m_lastFrameTime;
+			bool bufferHasData = acc.m_accumulationBuffer.payloadBuffer.length > 0;
+			bool transferFrameDue = timeSinceFrame > virtualChannels[vc].expirationTime;
+			bool bufferReady = bufferHasData && (acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdfSize);
+
+			if (bufferReady || transferFrameDue) {
+				// We use a while loop to drain the buffer if multiple frames are ready
+				while (acc.m_accumulationBuffer.payloadBuffer.length > 0 || transferFrameDue) {
+					BitBuffer<MAX_ACCUMULATOR_LENGTH>& payloadBuffer = acc.m_accumulationBuffer.payloadBuffer;
+					
+					size_t numBytesToWrap = std::min(acc.m_fixedTfdfSize, payloadBuffer.length);
+					size_t paddingNeeded = acc.m_fixedTfdfSize - numBytesToWrap;
+
+					// 1. Calculate FHP and shift the metadata indices BEFORE erasing data
+					uint16_t fhp = DEFAULT_FHP; // Default: No new packet starts in this frame
+					size_t keptIndicesCount = 0;
+
+					PacketPtrBuffer& headerIndices = acc.m_accumulationBuffer.packetPointers;
+					size_t newTailPointer = headerIndices.m_queueTail;
+
+					for (size_t count = headerIndices.m_queueTail; count < headerIndices.m_queueSize; count++) {
+						size_t i = (headerIndices.m_queueTail + count) % MAX_INCOMING_PACKETS;
+						size_t startIndex = headerIndices.m_packetStartIndices[i];
+
+						if (startIndex < numBytesToWrap) {
+							// This packet starts inside our current frame window
+							if (fhp == 2047) {
+								fhp = static_cast<uint16_t>(startIndex); // Grab the very first one
+							}
+
+							newTailPointer++;
+							// We consume this index, so we do NOT copy it to the 'kept' count.
+						} else {
+							// This packet starts in a future frame. Shift its offset back!
+							headerIndices.m_packetStartIndices[i] = startIndex - numBytesToWrap;
+						}
+					}
+					
+					// Update the queue size to drop the consumed indices
+					headerIndices.m_queueTail = newTailPointer;
+					// (Note: if using a custom ring buffer, adjust your head/tail pointers instead of resize)
+
+					// 2. Construct the Transfer Frame Payload
+					BitBuffer<MAX_DATA_FIELD_LENGTH> tfdfPayload(&payloadBuffer.data[0], numBytesToWrap);
+					if (paddingNeeded > 0) {
+						tfdfPayload.fill(tfdfPayload.length, 0x00, paddingNeeded);
+					}
+
+					// 3. NOW it is safe to erase the bytes from the accumulator
+					payloadBuffer.eraseFromStart(numBytesToWrap);
+
+					// 4. Reset the temporal trigger and dispatch
+					acc.m_lastFrameTime = std::chrono::steady_clock::now();
+					transferFrameDue = false;
+
+					PrepareTransferFrame(tfdfPayload, vc, fhp);
+					virtualChannels[vc].incrementFrameCount();
+					frameGeneratedThisTick = true;
+					
+					// Break the while loop if we don't have enough data for another full frame
+					if (payloadBuffer.length < acc.m_fixedTfdfSize) {
+						break;
+					}
+				}
+				
+			}
+		}
+
+		// 2. THE OID BRANCH (System Starvation Check)
+        if (!frameGeneratedThisTick) {
+            BitBuffer<MAX_DATA_FIELD_LENGTH> idlePayload;
+            
+            // CCSDS typically recommends an alternating bit pattern like 0x55 or 0xAA 
+            // for idle data to keep the SDR's bit-synchronizer locked.
+            idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_FIELD_LENGTH); 
+            
+            // Pass the dedicated IDLE_VCID so the header is formed correctly.
+            PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP);
+        }
+
+		std::this_thread::sleep_until(nextTick);
+	}
+
+	return;
+}
+
+void USLP::PrepareTransferFrame(
+	BitBuffer<MAX_DATA_ZONE_LENGTH>& data, 
+	const uint8_t& VCID,
+	const uint16_t& fhp) {
+	TFDataField tfdf = VCPacketProcessing(data, VCID, fhp);
+	TransferFrame tf = VCGeneration(tfdf, VCID);
+
+	m_frameMultiplexerQueue.push(std::move(tf));
+}
+
+TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, const uint8_t& VCID, const uint16_t& fhp) {
+	TFDataField tfdf;
+	//tfdf.securityHeader = GetSecurityHeader();
+
+	tfdf.header.TFDZConstructionRules = DEFAULT_CONSTRUCTION_RULE;
+	tfdf.header.USLPProtocolIdentifier = UPID;
+	tfdf.header.FirstHeaderLastValidOctetPointer = fhp;
+	tfdf.TFDZ = data;
+	//tfdf.securityTrailer = GetSecurityTrailer();
+	//std::cout << "security trailer length on init: " << tfdf.securityTrailer.length << std::endl;
+
+	return tfdf;
+}
+
+TransferFrame USLP::VCGeneration(TFDataField& tfdf, const uint8_t& VCID) {
+	// Frame Init Procedure
+	TFPrimaryHeader tfph;
+	tfph.TFVN = managedParams.physical.TFVN; // Just carries the current version
+	tfph.SCID = managedParams.master.SCID; // Constant we decide on when the mission launches
+	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
+	tfph.VCID = VCID;
+	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
+	tfph.endTFPrimaryHeaderFlag = 0; // Decided possibly if we need super fast transfer of packet
+	tfph.TFLength = 0; // To be decided later (measured in octets)
+	tfph.bypassSequenceControlFlag = 1; // Expedited Frame, no COP
+	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
+	tfph.spare = 0b00; //Decide what to do with this later
+	tfph.operationalControlFieldFlag = 0; // No OCF because no COP
+	tfph.VCFrameCountLength = managedParams.virtualChannels[VCID].expeditedCountLength;
+	tfph.VCFrameCountField = virtualChannels[VCID].vcFrameCount;
+
+	TransferFrame tf {};
+	tf.TFPH = tfph;
+	tf.TFDF = tfdf;
+
+	return tf;
 }
 
 // Converts higher level input data into a stream of bytes for the physical layer
-BitBuffer<MAX_DATA_SIZE> USLP::DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message) {
+/*BitBuffer<MAX_DATA_SIZE> USLP::DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message) {
 	uint16_t messagePtr = 0; // with current data size limit of 65535 uint16_t works
 	uint32_t serializedDataPtr = 0;
 	BitBuffer<MAX_DATA_SIZE> serializedData;
@@ -214,13 +381,7 @@ BitBuffer<MAX_DATA_SIZE> USLP::DataToStream(MessageType type, BitBuffer<MAX_MESS
 	serializedData.length = serializedDataPtr;
 
 	return serializedData;
-}
-
-USLP::USLP(uint8_t numVirtualChannels) : packer(managedParams) {
-	for (int i = 0; i < numVirtualChannels; i++) {
-		maxDataZoneLengths[i] = TFDataSize(i);
-	}
-}
+}*/
 
 int main(int argc, char* argv[]) {
 	std::array<uint8_t, TEST_ARRAY_SIZE> message = GenerateRandomBytes();
@@ -235,12 +396,12 @@ int main(int argc, char* argv[]) {
 	std::array<uint8_t, MAX_MESSAGE_LENGTH> messageContainer {};
 	std::memcpy(&messageContainer[0], &message[0], message.size());
 
-	uint8_t numVC = 2;
-	USLP uslp(numVC);
+	USLPConfig managedParams {};
+	USLP uslp(managedParams);
 	std::cout << "cons" << std::endl;
 
-	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer {messageContainer, TEST_ARRAY_SIZE};
-	BitBuffer<MAX_DATA_SIZE> serializedTransferFrames = uslp.DataToStream(type, messageBuffer);
+	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer(&messageContainer[0], TEST_ARRAY_SIZE);
+	//BitBuffer<MAX_DATA_SIZE> serializedTransferFrames = uslp.DataToStream(type, messageBuffer);
 
 	std::ofstream out("Transfer Frames.txt", std::ios::trunc);
 	int lastTFIndex = 0;
@@ -263,7 +424,7 @@ int main(int argc, char* argv[]) {
 			out << "\n";
 		}
 
-		out << std::setw(3) << static_cast<int>(serializedTransferFrames.data[i]) << "  ";
+		//out << std::setw(3) << static_cast<int>(serializedTransferFrames.data[i]) << "  ";
 	}
 
 	return 0;
