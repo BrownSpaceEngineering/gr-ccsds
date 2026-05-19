@@ -33,7 +33,7 @@ template <size_t M, size_t N> void append(const BitBuffer<M>& src, BitBuffer<N>&
 };
 
 template <typename T>
-class ThreadSafeQueue {
+class ThreadSafeMultiplexerQueue {
 private:
     std::queue<T> m_queue;
     std::mutex m_mutex;
@@ -49,10 +49,19 @@ public:
         m_cond.notify_one(); // Wake up the multiplexing thread
     }
 
-    bool pop(T& value) {
+    // Returns true if an item was successfully popped, 
+    // false if the timeout expired first.
+    bool pop_with_timeout(T& value, std::chrono::milliseconds timeout) {
         std::unique_lock<std::mutex> lock(m_mutex);
-        // Wait until there is data in the queue
-        m_cond.wait(lock, [this] { return !m_queue.empty(); });
+        
+        // Wait until there is data OR the timeout expires
+        bool dataAvailable = m_cond.wait_for(lock, timeout, [this] { 
+            return !m_queue.empty(); 
+        });
+        
+        if (!dataAvailable) {
+            return false;
+        }
         
         value = std::move(m_queue.front());
         m_queue.pop();

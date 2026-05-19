@@ -18,35 +18,19 @@
 
 TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	TFPrimaryHeader tfph;
-	tfph.protocolCommandControlFlag = false; //Until we work on COP
 	tfph.TFVN = managedParams.physical.TFVN; // Just carries the current version
+	tfph.SCID = managedParams.master.SCID; // Constant we decide on when the mission launches
 	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
+	tfph.VCID = VCID;
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
-	tfph.endTFPrimaryHeaderFlag; // Decided possibly if we need super fast transfer of packet
-	tfph.bypassSequenceControlFlag;
-	tfph.protocolCommandControlFlag;
-	tfph.operationalControlFieldFlag; //Seems like a good safeguard to have
-	tfph.VCFrameCountLength;
-	tfph.VCFrameCountField;
-
-	//tfph.TFLength = 0; // To be decided later (measured in octets)
-	//tfph.spare = 0b00; //Decide what to do with this later
-	//tfph.SCID = 0; // Constant we decide on when the mission launches
-
-	// Test packing a Transfer Frame Primary Header (TO BE REMOVED)
-	tfph.TFVN = 4;
-	tfph.SCID = 2;
-	tfph.sourceOrDestinationID = 1;
-	tfph.VCID = 2;
-	tfph.MAPID = 0;
-	tfph.endTFPrimaryHeaderFlag = false;
-	tfph.TFLength = 512;
-	tfph.bypassSequenceControlFlag = false;
-	tfph.protocolCommandControlFlag = false;
-	tfph.spare = 0b00;
-	tfph.operationalControlFieldFlag = false;
-	tfph.VCFrameCountLength = 2;
-	tfph.VCFrameCountField = 5;
+	tfph.endTFPrimaryHeaderFlag = 0; // Decided possibly if we need super fast transfer of packet
+	tfph.TFLength = 0; // To be decided later (measured in octets)
+	tfph.bypassSequenceControlFlag = 1; // Expedited Frame, no COP
+	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
+	tfph.spare = 0b00; //Decide what to do with this later
+	tfph.operationalControlFieldFlag = 0; // No OCF because no COP
+	tfph.VCFrameCountLength = managedParams.virtualChannels[VCID].expeditedCountLength;
+	tfph.VCFrameCountField = virtualChannels[VCID].vcFrameCount;
 
 	return tfph;
 }
@@ -112,7 +96,7 @@ OperationalControlField USLP::GetOperationalControlField(USLPContext context) {
 	return ocf;
 }
 
-FrameErrorControlField USLP::GetFrameErrorControlField() {
+FrameErrorControlField USLP::GetFrameErrorControlField(TransferFrame& tf) {
 	FrameErrorControlField fecf {};
 
 	if (managedParams.physical.FECFPresent) {
@@ -203,10 +187,31 @@ void USLP::VCPRequest(
 	}
 }
 
+// Thread for multiplexing VCs
+void USLP::VCMultiplexer() {
+	constexpr auto TICK_RATE = std::chrono::milliseconds(20);
+
+	while (m_running) {
+		TransferFrame frameToProcess;
+        
+		bool receivedRealFrame = m_frameMultiplexerQueue.pop_with_timeout(frameToProcess, TICK_RATE);
+        // This will block safely without burning CPU cycles until 
+        // PrepareTransferFrame notifies the condition variable.
+        if (receivedRealFrame) {
+			AllFramesGenerationFunction(frameToProcess);
+        } else {
+            // CASE B: 20ms passed with absolutely zero activity. Generate OID.
+            BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
+            idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
+            
+			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+        }
+	}
+}
+
 // Handles both wrapping packets in Transfer Frames and Multiplexing finished Transfer Frames
 void USLP::VCPacketThread() {
 	constexpr auto TICK_RATE = std::chrono::milliseconds(20);
-	constexpr uint16_t DEFAULT_FHP = 2047;
 
 	while (m_running) {
 		auto nextTick = std::chrono::steady_clock::now() + TICK_RATE;
@@ -269,7 +274,7 @@ void USLP::VCPacketThread() {
 					acc.m_lastFrameTime = std::chrono::steady_clock::now();
 					transferFrameDue = false;
 
-					PrepareTransferFrame(tfdfPayload, vc, fhp);
+					PrepareTransferFrame(tfdfPayload, vc, fhp, DEFAULT_UPID);
 					virtualChannels[vc].incrementFrameCount();
 					frameGeneratedThisTick = true;
 					
@@ -282,18 +287,6 @@ void USLP::VCPacketThread() {
 			}
 		}
 
-		// 2. THE OID BRANCH (System Starvation Check)
-        if (!frameGeneratedThisTick) {
-            BitBuffer<MAX_DATA_FIELD_LENGTH> idlePayload;
-            
-            // CCSDS typically recommends an alternating bit pattern like 0x55 or 0xAA 
-            // for idle data to keep the SDR's bit-synchronizer locked.
-            idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_FIELD_LENGTH); 
-            
-            // Pass the dedicated IDLE_VCID so the header is formed correctly.
-            PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP);
-        }
-
 		std::this_thread::sleep_until(nextTick);
 	}
 
@@ -302,15 +295,20 @@ void USLP::VCPacketThread() {
 
 void USLP::PrepareTransferFrame(
 	BitBuffer<MAX_DATA_ZONE_LENGTH>& data, 
-	const uint8_t& VCID,
-	const uint16_t& fhp) {
-	TFDataField tfdf = VCPacketProcessing(data, VCID, fhp);
+	uint8_t VCID,
+	uint16_t fhp,
+    uint8_t UPID) {
+	TFDataField tfdf = VCPacketProcessing(data, VCID, fhp, UPID);
 	TransferFrame tf = VCGeneration(tfdf, VCID);
 
-	m_frameMultiplexerQueue.push(std::move(tf));
+	if (UPID == DEFAULT_UPID) {
+		m_frameMultiplexerQueue.push(std::move(tf));
+	} else if (UPID == IDLE_UPID) {
+		AllFramesGenerationFunction(tf);
+	}
 }
 
-TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, const uint8_t& VCID, const uint16_t& fhp) {
+TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, uint8_t VCID, uint16_t fhp, uint8_t UPID) {
 	TFDataField tfdf;
 	//tfdf.securityHeader = GetSecurityHeader();
 
@@ -324,26 +322,17 @@ TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, cons
 	return tfdf;
 }
 
-TransferFrame USLP::VCGeneration(TFDataField& tfdf, const uint8_t& VCID) {
+TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 	// Frame Init Procedure
-	TFPrimaryHeader tfph;
-	tfph.TFVN = managedParams.physical.TFVN; // Just carries the current version
-	tfph.SCID = managedParams.master.SCID; // Constant we decide on when the mission launches
-	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
-	tfph.VCID = VCID;
-	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
-	tfph.endTFPrimaryHeaderFlag = 0; // Decided possibly if we need super fast transfer of packet
-	tfph.TFLength = 0; // To be decided later (measured in octets)
-	tfph.bypassSequenceControlFlag = 1; // Expedited Frame, no COP
-	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
-	tfph.spare = 0b00; //Decide what to do with this later
-	tfph.operationalControlFieldFlag = 0; // No OCF because no COP
-	tfph.VCFrameCountLength = managedParams.virtualChannels[VCID].expeditedCountLength;
-	tfph.VCFrameCountField = virtualChannels[VCID].vcFrameCount;
-
 	TransferFrame tf {};
-	tf.TFPH = tfph;
+	tf.TFPH = GetPrimaryHeader(VCID);
 	tf.TFDF = tfdf;
+
+	return tf;
+}
+
+TransferFrame USLP::AllFramesGenerationFunction(TransferFrame& tf) {
+	tf.FECF = GetFrameErrorControlField(tf);
 
 	return tf;
 }

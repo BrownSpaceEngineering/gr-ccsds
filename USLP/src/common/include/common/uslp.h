@@ -97,7 +97,7 @@ public:
     BitBuffer<MAX_SECURITY_TRAILER_LENGTH> GetSecurityTrailer();
     TFDataField GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data, uint32_t GVCID);
     OperationalControlField GetOperationalControlField(USLPContext context);
-    FrameErrorControlField GetFrameErrorControlField();
+    FrameErrorControlField GetFrameErrorControlField(TransferFrame& tf);
     TransferFrame DataToTransferFrame(
         uint8_t VCID, 
         BitBuffer<MAX_DATA_FIELD_LENGTH> message,
@@ -119,19 +119,23 @@ public:
     bool IsValidPVN(uint8_t PVN);
     TFDataField VCPacketProcessing(
         BitBuffer<MAX_DATA_ZONE_LENGTH>& data,
-        const uint8_t& VCID, 
-        const uint16_t& fhp);
-    TransferFrame VCGeneration(TFDataField& tfdf, const uint8_t& VCID);
+        uint8_t VCID, 
+        uint16_t fhp,
+        uint8_t UPID);
+    TransferFrame VCGeneration(TFDataField& tfdf, uint8_t VCID);
+    void VCMultiplexer();
     void VCPacketThread(); // Processes incoming packet streams and creates transfer frames
     void PrepareTransferFrame(
         BitBuffer<MAX_DATA_ZONE_LENGTH>& data,
-        const uint8_t& VCID,
-        const uint16_t& fhp);
+        uint8_t VCID,
+        uint16_t fhp,
+        uint8_t UPID);
+    TransferFrame AllFramesGenerationFunction(TransferFrame& tf);
 private:
     USLPPacker packer;
     USLPConfig managedParams;
     std::array<VirtualChannel, VC_COUNT> virtualChannels;
-    ThreadSafeQueue<TransferFrame> m_frameMultiplexerQueue;
+    ThreadSafeMultiplexerQueue<TransferFrame> m_frameMultiplexerQueue;
 
     bool m_running = true;
 };

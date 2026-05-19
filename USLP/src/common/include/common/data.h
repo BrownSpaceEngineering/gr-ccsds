@@ -21,10 +21,12 @@ constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; // Maximum size of the 
 constexpr uint8_t  VC_COUNT = 					2; 			// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
 constexpr uint16_t MAX_INCOMING_PACKETS =   	UINT16_MAX; // Max upper layer packets that can wait to be wrapped
 constexpr uint8_t  IDLE_VCID = 					63; 		// CCSDS standard
-constexpr uint8_t  UPID = 						0b01111; 	// Indicates CFDP packets
+constexpr uint8_t  DEFAULT_UPID = 				0b00000; 	// Indicates CFDP packets
+constexpr uint8_t  IDLE_UPID = 					0b11111; 	// Indicates Idle data
 constexpr uint8_t  IDLE_PATTERN = 				0x55;		// For OID frames
 constexpr uint8_t  DEFAULT_CONSTRUCTION_RULE = 	0; 			// For TFDF
 constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		4; 			// 4 bytes of sequence number per frame
+constexpr uint16_t DEFAULT_FHP =				2047;		// Default First Header Pointer
 
 // Transfer Frame Data Lengths in bytes
 #define ZERO								0
