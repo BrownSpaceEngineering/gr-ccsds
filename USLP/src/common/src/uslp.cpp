@@ -333,6 +333,7 @@ TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 
 TransferFrame USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 	tf.FECF = GetFrameErrorControlField(tf);
+	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
 
 	return tf;
 }

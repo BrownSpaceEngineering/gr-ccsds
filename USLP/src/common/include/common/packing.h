@@ -22,10 +22,10 @@ public:
     BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph);
     BitBuffer<MAX_INSERT_ZONE_LENGTH> packInsertZone(TFInsertZone tfiz);
     BitBuffer<DATA_FIELD_HEADER_LENGTH> packDataFieldHeader(TFDFHeader tfdfh);
-    BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField tfdf);
-    BitBuffer<OCF_DATA_LENGTH> packOperationalControlField(OperationalControlField ocf, USLPContext context);
+    BitBuffer<MAX_DATA_FIELD_LENGTH> packDataField(TFDataField& tfdf);
+    BitBuffer<OCF_DATA_LENGTH> packOperationalControlField(OperationalControlField ocf, uint8_t VCID);
     BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fecf);
-    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf, USLPContext context);
+    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf);
 
 private:
     USLPConfig& managedParams;

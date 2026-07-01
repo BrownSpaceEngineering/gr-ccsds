@@ -88,8 +88,7 @@ public:
 
 class USLP {
 public:
-    USLP(USLPConfig& managedParams) : packer(managedParams) {
-    };
+    USLP(USLPConfig& managedParams) : packer(managedParams) {};
 
     TFPrimaryHeader GetPrimaryHeader(uint8_t VCID);
     TFInsertZone GetInsertZone();

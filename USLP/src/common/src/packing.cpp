@@ -80,7 +80,7 @@ BitBuffer<DATA_FIELD_HEADER_LENGTH> USLPPacker::packDataFieldHeader(TFDFHeader t
     return packedDataFieldHeader;
 }
 
-BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField tfdf) {
+BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField& tfdf) {
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packed;
     //std::cout << "pack header" << std::endl;
     BitBuffer<3> packedHeader = packDataFieldHeader(tfdf.header);
@@ -96,8 +96,8 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField tfdf) {
     return packed;
 }
 
-BitBuffer<OCF_DATA_LENGTH> USLPPacker::packOperationalControlField(OperationalControlField ocf, USLPContext context) {
-	if (managedParams.virtualChannels[context.currentVCID].COPInEffect != USLPConfig::COPType::NONE) {
+BitBuffer<OCF_DATA_LENGTH> USLPPacker::packOperationalControlField(OperationalControlField ocf, uint8_t VCID) {
+	if (managedParams.virtualChannels[VCID].COPInEffect != USLPConfig::COPType::NONE) {
         uint32_t packed = 0;
 
         packed |= ((uint32_t)(ocf.SDUType)) << 29;
@@ -122,7 +122,7 @@ BitBuffer<FECF_DATA_LENGTH> USLPPacker::packFrameErrorControlField(FrameErrorCon
     }
 }
 
-BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame tf, USLPContext context) {
+BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame tf) {
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packed;
     //std::cout << "packPrimary" << std::endl;
 	BitBuffer<PRIMARY_HEADER_LENGTH> packedPrimaryHeader = packPrimaryHeader(tf.TFPH);
@@ -134,7 +134,7 @@ BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame
     //std::cout << "\n";
 	BitBuffer<MAX_INSERT_ZONE_LENGTH> packedInsertZone = packInsertZone(tf.TFIZ);
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packedDataField = packDataField(tf.TFDF);
-	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF, context);
+	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF, tf.TFPH.VCID);
 	BitBuffer<FECF_DATA_LENGTH> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);
 
 	size_t offset = 0;
