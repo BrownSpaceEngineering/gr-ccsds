@@ -56,8 +56,12 @@ class VirtualChannel {
 private:
     void initializeMask(uint8_t vcFrameCountLength) {
         // Clamp length between 1 and 7 per USLP spec safety
-        vcFrameCountLength = std::clamp<uint8_t>(vcFrameCountLength, 1, 7);
-        
+        //vcFrameCountLength = std::clamp<uint8_t>(vcFrameCountLength, 1, 7);
+        if (vcFrameCountLength < 0 || vcFrameCountLength > 8) {
+            std::cerr << "Invalid vcFrameCountLenth value; must be between 1 and 7\n";
+            return;
+        }
+
         // Calculate the maximum bitmask for the specified byte width
         // e.g., 1 byte -> 0xFF, 2 bytes -> 0xFFFF, 4 bytes -> 0xFFFFFFFF
         if (vcFrameCountLength == 8) {
@@ -85,6 +89,13 @@ public:
     uint64_t vcFrameCountMask = 0xFFFFFFFF;
     uint64_t vcFrameCount = 0;
 };
+
+struct TFAllFormats {
+    TransferFrame tf;
+    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes;
+};
+
+static constexpr int maxFinishedTransferFrames = 1024;
 
 class USLP {
 public:
@@ -129,12 +140,14 @@ public:
         uint8_t VCID,
         uint16_t fhp,
         uint8_t UPID);
-    TransferFrame AllFramesGenerationFunction(TransferFrame& tf);
+    void AllFramesGenerationFunction(TransferFrame& tf);
 private:
     USLPPacker packer;
     USLPConfig managedParams;
     std::array<VirtualChannel, VC_COUNT> virtualChannels;
     ThreadSafeMultiplexerQueue<TransferFrame> m_frameMultiplexerQueue;
+    std::array<TFAllFormats, maxFinishedTransferFrames> m_finishedTransferFrames;
+    uint64_t m_finishedTransferFramesIdx = 0;
 
     bool m_running = true;
 };

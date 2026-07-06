@@ -1,6 +1,5 @@
 CXX := g++
-CXXFLAGS := -std=c++20 -O0 -Wall -Wextra -I src/common/include -MMD -MP
-# add this to flags possibly: -I CRCpp/inc
+CXXFLAGS := -std=c++20 -O0 -Wall -Wextra -I src/common/include -I CRCpp/inc -MMD -MP
 
 # Source files
 COMMON_SRCS := $(wildcard src/common/src/*.cpp)
@@ -30,25 +29,25 @@ utils: build/utils.o $(OBJS) | bin
 
 # Compile common object files
 build/%.o: src/common/src/%.cpp
-	@if not exist "build" mkdir "build"
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Programs specific object files
 build/uslp.o: src/common/src/uslp.cpp
-	@if not exist "build" mkdir "build"
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 build/packing.o: src/common/src/packing.cpp
-	@if not exist "build" mkdir "build"
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 build/utils.o: src/common/src/utils.cpp
-	@if not exist "build" mkdir "build"
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Create bin directory
 bin:
-	@if not exist "bin" mkdir "bin"
+	@mkdir -p bin
 
 # Clean build artifacts
 clean:

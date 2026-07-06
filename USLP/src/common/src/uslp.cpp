@@ -14,6 +14,8 @@
 #include <common/utils.h>
 #include <common/uslp.h>
 #include <common/packing.h>
+#include <chrono>
+#include <thread>
 //#include "CRC.h"
 
 TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
@@ -177,13 +179,18 @@ void USLP::VCPRequest(
         uint8_t PVN,
         uint32_t SDU_ID,
         ServiceType serviceType) {
-	if (!IsValidPVN(PVN)) return;
+	if (!IsValidPVN(PVN)) {
+		std::cerr << "Invalid PVN provided\n";
+		return; // Unfinished logic, always returns true
+	}
 
 	uint8_t VCID = static_cast<uint8_t>(VC_BITMASK & GVCID);
 
 	if (VCID < VC_COUNT) {
 		VirtualChannelAccumulator& accumulator = virtualChannels[VCID].accumulator;
 		accumulator.processIncomingPacket(packet, GVCID);
+	} else {
+		std::cerr << "Invalid GVCID provided\n";
 	}
 }
 
@@ -195,7 +202,7 @@ void USLP::VCMultiplexer() {
 		TransferFrame frameToProcess;
         
 		bool receivedRealFrame = m_frameMultiplexerQueue.pop_with_timeout(frameToProcess, TICK_RATE);
-        // This will block safely without burning CPU cycles until 
+        // This will block safely without burning CPU cycles until
         // PrepareTransferFrame notifies the condition variable.
         if (receivedRealFrame) {
 			AllFramesGenerationFunction(frameToProcess);
@@ -217,12 +224,13 @@ void USLP::VCPacketThread() {
 		auto nextTick = std::chrono::steady_clock::now() + TICK_RATE;
 		bool frameGeneratedThisTick = false;
 
+		// Potential issue with current system where if a virtual channel receives a constant
+		// stream, others will never be processed
 		for (size_t vc = 0; vc < VC_COUNT; vc++) {
 			VirtualChannelAccumulator& acc = virtualChannels[vc].accumulator;
 			auto timeSinceFrame = std::chrono::steady_clock::now() - acc.m_lastFrameTime;
-			bool bufferHasData = acc.m_accumulationBuffer.payloadBuffer.length > 0;
 			bool transferFrameDue = timeSinceFrame > virtualChannels[vc].expirationTime;
-			bool bufferReady = bufferHasData && (acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdfSize);
+			bool bufferReady = acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdfSize;
 
 			if (bufferReady || transferFrameDue) {
 				// We use a while loop to drain the buffer if multiple frames are ready
@@ -240,7 +248,9 @@ void USLP::VCPacketThread() {
 					size_t newTailPointer = headerIndices.m_queueTail;
 
 					for (size_t count = headerIndices.m_queueTail; count < headerIndices.m_queueSize; count++) {
-						size_t i = (headerIndices.m_queueTail + count) % MAX_INCOMING_PACKETS;
+						size_t i = (headerIndices.m_queueTail + count);
+						if (i > MAX_INCOMING_PACKETS) i -= MAX_INCOMING_PACKETS;
+
 						size_t startIndex = headerIndices.m_packetStartIndices[i];
 
 						if (startIndex < numBytesToWrap) {
@@ -250,9 +260,9 @@ void USLP::VCPacketThread() {
 							}
 
 							newTailPointer++;
-							// We consume this index, so we do NOT copy it to the 'kept' count.
+							// We consume this index, so we do not copy it to the 'kept' count.
 						} else {
-							// This packet starts in a future frame. Shift its offset back!
+							// This packet starts in a future frame. Shift its offset back
 							headerIndices.m_packetStartIndices[i] = startIndex - numBytesToWrap;
 						}
 					}
@@ -331,11 +341,13 @@ TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 	return tf;
 }
 
-TransferFrame USLP::AllFramesGenerationFunction(TransferFrame& tf) {
+// Interfaces with GNU Radio module, unsure how to have it return to that yet
+void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 	tf.FECF = GetFrameErrorControlField(tf);
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
 
-	return tf;
+	m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};
+	m_finishedTransferFramesIdx++;
 }
 
 // Converts higher level input data into a stream of bytes for the physical layer
@@ -388,7 +400,7 @@ int main(int argc, char* argv[]) {
 
 	USLPConfig managedParams {};
 	USLP uslp(managedParams);
-	std::cout << "cons" << std::endl;
+	std::cout << "cos" << std::endl;
 
 	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer(&messageContainer[0], TEST_ARRAY_SIZE);
 	//BitBuffer<MAX_DATA_SIZE> serializedTransferFrames = uslp.DataToStream(type, messageBuffer);

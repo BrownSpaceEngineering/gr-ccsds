@@ -56,7 +56,7 @@ public:
         
         // Wait until there is data OR the timeout expires
         bool dataAvailable = m_cond.wait_for(lock, timeout, [this] { 
-            return !m_queue.empty(); 
+            return !m_queue.empty();
         });
         
         if (!dataAvailable) {
