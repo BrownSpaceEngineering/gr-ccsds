@@ -41,7 +41,7 @@ BitBuffer<PRIMARY_HEADER_LENGTH> USLPPacker::packPrimaryHeader(TFPrimaryHeader t
     packedHeader |= ((uint64_t)(tfph.spare))                  		<< SPARE_POS;
     packedHeader |= ((uint64_t)(tfph.operationalControlFieldFlag)) 	<< OCF_FLAG_POS;
     packedHeader |= ((uint64_t)(tfph.VCFrameCountLength))    		<< VC_FRAME_COUNT_LENGTH_POS;
-	packedHeader |= ((uint64_t)(tfph.VCFrameCountField))    		<< VC_FRAME_COUNT_POS;
+	packedHeader |= ((uint64_t)(tfph.VCFrameCount))    		<< VC_FRAME_COUNT_POS;
 	//printBytes(packedHeader);
 	int numBytes = (tfph.endTFPrimaryHeaderFlag == 1) ? 4 : 8;
 
@@ -63,7 +63,7 @@ BitBuffer<DATA_FIELD_HEADER_LENGTH> USLPPacker::packDataFieldHeader(TFDFHeader t
 
     packed |= ((uint64_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
     packed |= ((uint64_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;
-    packed |= ((uint64_t)(tfdfh.FirstHeaderLastValidOctetPointer))  << FIRST_HEADER_LAST_VALID_OCTET_POS;
+    packed |= ((uint64_t)(tfdfh.firstHeaderLastValidOctetPointer))  << FIRST_HEADER_LAST_VALID_OCTET_POS;
 
 	int numBytes = DATA_FIELD_HEADER_LENGTH;
 
@@ -97,7 +97,7 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField& tfdf) {
 }
 
 BitBuffer<OCF_DATA_LENGTH> USLPPacker::packOperationalControlField(OperationalControlField ocf, uint8_t VCID) {
-	if (managedParams.virtualChannels[VCID].COPInEffect != USLPConfig::COPType::NONE) {
+	if (managedParams.virtualChannelConfigs[VCID].COPInEffect != USLPConfig::COPType::NONE) {
         uint32_t packed = 0;
 
         packed |= ((uint32_t)(ocf.SDUType)) << 29;

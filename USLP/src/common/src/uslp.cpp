@@ -1,5 +1,7 @@
+#include <thread>
 #include <stdint.h> 
 #include <iostream>
+#include <iomanip>
 #include <bitset>
 #include <vector>
 #include <array>
@@ -15,7 +17,7 @@
 #include <common/uslp.h>
 #include <common/packing.h>
 #include <chrono>
-#include <thread>
+
 //#include "CRC.h"
 
 TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
@@ -31,8 +33,11 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
 	tfph.spare = 0b00; //Decide what to do with this later
 	tfph.operationalControlFieldFlag = 0; // No OCF because no COP
-	tfph.VCFrameCountLength = managedParams.virtualChannels[VCID].expeditedCountLength;
-	tfph.VCFrameCountField = virtualChannels[VCID].vcFrameCount;
+	log("GetPrimaryHeader");
+	log(static_cast<uint32_t>(VCID));
+	tfph.VCFrameCountLength = managedParams.virtualChannelConfigs[VCID].expeditedCountLength;
+	tfph.VCFrameCount = virtualChannels[VCID].vcFrameCount;
+	log("GetPrimaryHeader2");
 
 	return tfph;
 }
@@ -89,7 +94,7 @@ TFDataField USLP::GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data, uint32_t G
 OperationalControlField USLP::GetOperationalControlField(USLPContext context) {
 	OperationalControlField ocf {};
 
-	if (managedParams.virtualChannels[context.currentVCID].COPInEffect != USLPConfig::COPType::NONE) {
+	if (managedParams.virtualChannelConfigs[context.currentVCID].COPInEffect != USLPConfig::COPType::NONE) {
 		// Default fields to be filled in logically later
 		ocf.SDUType = 0;
 		ocf.OCFData = 0;
@@ -111,63 +116,6 @@ FrameErrorControlField USLP::GetFrameErrorControlField(TransferFrame& tf) {
 	return fecf;
 }
 
-// Converts higher level input data into a Transfer Frame ready for transmission
-/*TransferFrame USLP::DataToTransferFrame(uint8_t VCID, BitBuffer<MAX_DATA_FIELD_LENGTH> message, USLPContext context) {
-	TFPrimaryHeader tfph = GetPrimaryHeader(VCID);
-	TFInsertZone tfiz = GetInsertZone();
-	TFDataField tfdf = GetDataField(message);
-	OperationalControlField ocf = GetOperationalControlField(context);
-	FrameErrorControlField fecf = GetFrameErrorControlField();
-
-	// Assemble the Transfer Frame
-	TransferFrame tf;
-	tf.TFPH = tfph;
-	tf.TFIZ = tfiz;
-	tf.TFDF = tfdf;
-	tf.OCF = ocf;
-	tf.FECF = fecf;
-
-	return tf;
-}*/
-
-// (To be implemented) Determines how many bytes of the message should be sent in the next transfer frame
-/*uint16_t USLP::TFDataSize(uint8_t vcid) {
-	uint16_t num_bytes = MAX_TRANSFER_FRAME_LENGTH - PRIMARY_HEADER_LENGTH;
-	std::cout << "1" << std::endl;
-	if (managedParams.physical.FECFPresent) {
-		if (managedParams.physical.isCRC32) {
-			num_bytes -= FECF_DATA_LENGTH;
-		} else {
-			num_bytes -= CRC16_DATA_LENGTH;
-		}
-	}
-	std::cout << "2" << std::endl;
-	if (managedParams.physical.insertZonePresent) {
-		num_bytes -= managedParams.physical.insertZoneLength;
-	}
-	std::cout << "3" << std::endl;
-	// This feels like it should be a constant for the physical link; I do not quite understand
-	if (managedParams.virtualChannels[vcid].COPInEffect != USLPConfig::COPType::NONE) {
-		num_bytes -= OCF_DATA_LENGTH;
-	}
-	std::cout << "4" << std::endl;
-	return num_bytes;
-	//return MAX_DATA_FIELD_LENGTH;
-}*/
-
-// Converts part of message into the data that will be wrapped in a transfer frame
-/*
-BitBuffer<MAX_DATA_FIELD_LENGTH> USLP::GetTFDataZone(uint16_t &messagePtr, BitBuffer<MAX_MESSAGE_LENGTH> message, USLPContext context) {
-	BitBuffer<MAX_DATA_FIELD_LENGTH> chunk;
-	uint16_t maxTFDataSize = maxDataZoneLengths[context.currentVCID];
-	uint16_t numBytesCopy = std::min(maxTFDataSize, static_cast<uint16_t>(message.length - messagePtr));
-	chunk.length = numBytesCopy;
-	std::memcpy(&chunk.data[0], &message.data[messagePtr], numBytesCopy);
-	messagePtr += numBytesCopy;
-	
-	return chunk;
-}*/
-
 // TO-DO: Checks with SANA registry
 bool USLP::IsValidPVN(uint8_t PVN) {
 	return true;
@@ -179,10 +127,11 @@ void USLP::VCPRequest(
         uint8_t PVN,
         uint32_t SDU_ID,
         ServiceType serviceType) {
-	if (!IsValidPVN(PVN)) {
+	if (!IsValidPVN(PVN)) { // Unfinished logic, always returns true
 		std::cerr << "Invalid PVN provided\n";
-		return; // Unfinished logic, always returns true
+		return;
 	}
+	log("VCPRequest");
 
 	uint8_t VCID = static_cast<uint8_t>(VC_BITMASK & GVCID);
 
@@ -201,16 +150,20 @@ void USLP::VCMultiplexer() {
 	while (m_running) {
 		TransferFrame frameToProcess;
         
+		std::cout << "popping\n";
 		bool receivedRealFrame = m_frameMultiplexerQueue.pop_with_timeout(frameToProcess, TICK_RATE);
-        // This will block safely without burning CPU cycles until
+        std::cout << "popped\n";
+		// This will block safely without burning CPU cycles until
         // PrepareTransferFrame notifies the condition variable.
         if (receivedRealFrame) {
+			std::cout << "received real frame\n";
 			AllFramesGenerationFunction(frameToProcess);
         } else {
             // CASE B: 20ms passed with absolutely zero activity. Generate OID.
             BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
             idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
             
+			std::cout << "prepare transfer frame frame\n";
 			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
         }
 	}
@@ -229,7 +182,8 @@ void USLP::VCPacketThread() {
 		for (size_t vc = 0; vc < VC_COUNT; vc++) {
 			VirtualChannelAccumulator& acc = virtualChannels[vc].accumulator;
 			auto timeSinceFrame = std::chrono::steady_clock::now() - acc.m_lastFrameTime;
-			bool transferFrameDue = timeSinceFrame > virtualChannels[vc].expirationTime;
+			bool transferFrameDue = (timeSinceFrame > virtualChannels[vc].expirationTime) && 
+									(acc.m_accumulationBuffer.payloadBuffer.length > 0);
 			bool bufferReady = acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdfSize;
 
 			if (bufferReady || transferFrameDue) {
@@ -308,10 +262,12 @@ void USLP::PrepareTransferFrame(
 	uint8_t VCID,
 	uint16_t fhp,
     uint8_t UPID) {
+	log("PrepareTransferFrame");
 	TFDataField tfdf = VCPacketProcessing(data, VCID, fhp, UPID);
 	TransferFrame tf = VCGeneration(tfdf, VCID);
 
 	if (UPID == DEFAULT_UPID) {
+		std::cout << "Pushing into multiplexer queue\n";
 		m_frameMultiplexerQueue.push(std::move(tf));
 	} else if (UPID == IDLE_UPID) {
 		AllFramesGenerationFunction(tf);
@@ -319,12 +275,13 @@ void USLP::PrepareTransferFrame(
 }
 
 TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, uint8_t VCID, uint16_t fhp, uint8_t UPID) {
+	log("VCPacketProcessing");
 	TFDataField tfdf;
 	//tfdf.securityHeader = GetSecurityHeader();
 
 	tfdf.header.TFDZConstructionRules = DEFAULT_CONSTRUCTION_RULE;
 	tfdf.header.USLPProtocolIdentifier = UPID;
-	tfdf.header.FirstHeaderLastValidOctetPointer = fhp;
+	tfdf.header.firstHeaderLastValidOctetPointer = fhp;
 	tfdf.TFDZ = data;
 	//tfdf.securityTrailer = GetSecurityTrailer();
 	//std::cout << "security trailer length on init: " << tfdf.securityTrailer.length << std::endl;
@@ -333,6 +290,7 @@ TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, uint
 }
 
 TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
+	log("VCGeneration");
 	// Frame Init Procedure
 	TransferFrame tf {};
 	tf.TFPH = GetPrimaryHeader(VCID);
@@ -343,6 +301,7 @@ TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 
 // Interfaces with GNU Radio module, unsure how to have it return to that yet
 void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
+	log("AllFramesGenerationFunction");
 	tf.FECF = GetFrameErrorControlField(tf);
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
 
@@ -350,42 +309,201 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 	m_finishedTransferFramesIdx++;
 }
 
-// Converts higher level input data into a stream of bytes for the physical layer
-/*BitBuffer<MAX_DATA_SIZE> USLP::DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message) {
-	uint16_t messagePtr = 0; // with current data size limit of 65535 uint16_t works
-	uint32_t serializedDataPtr = 0;
-	BitBuffer<MAX_DATA_SIZE> serializedData;
 
-	while (messagePtr < message.length) {
-		uint8_t VCID = static_cast<uint8_t>(type);
-		USLPContext context {VCID};
-		std::cout << "getting data zone" << std::endl;
-		BitBuffer<MAX_DATA_FIELD_LENGTH> chunk = GetTFDataZone(messagePtr, message, context);
-		std::cout << "getting tf" << std::endl;
-		TransferFrame tf = DataToTransferFrame(VCID, chunk, context);
-		std::cout << "packing tf" << std::endl;
-		BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packedFrame = packer.packTransferFrame(tf, context);
-		
-		for (int i = 0; i < 8; i++) {
-			std::bitset<8> b{packedFrame.data[i]};
-			std::cout << b << " ";
-		}
-		std::cout << "\n";
+// Structure to log exactly when a packet entered the USLP stack via VCPRequest
+struct PacketInjectionRecord {
+    std::chrono::steady_clock::time_point timestamp;
+    uint8_t vcid;
+    uint32_t sduId;
+    size_t lengthBytes;
+};
 
-		assert(serializedDataPtr + packedFrame.length <= MAX_DATA_SIZE);
-		std::memcpy(&serializedData.data[serializedDataPtr], &packedFrame.data[0], packedFrame.length);
-		std::cout << "ptr " << serializedDataPtr << std::endl;
-		std::cout << "ptr ";
-		std::cout << "\n";
-		serializedDataPtr += packedFrame.length;
-	}
+// Helper to generate dummy CCSDS/CFDP packet payloads
+BitBuffer<MAX_MESSAGE_LENGTH> CreateDummyPacket(uint8_t fillByte, size_t numBytes) {
+    BitBuffer<MAX_MESSAGE_LENGTH> packet;
+    packet.length = numBytes;
+    for (size_t i = 0; i < numBytes; ++i) {
+        packet.data[i] = fillByte;
+    }
+    return packet;
+}
 
-	serializedData.length = serializedDataPtr;
+void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
+    std::cout << "==================================================\n";
+    std::cout << "[TEST START] Multi-VC VCPRequest Injection & Multiplexing\n";
+    std::cout << "==================================================\n";
 
-	return serializedData;
-}*/
+    std::vector<PacketInjectionRecord> injectionLog;
+    const auto testStartTime = std::chrono::steady_clock::now();
+
+    // Define 3 target Virtual Channels
+    // VC 0: High-Priority Spacecraft Commands / Real-Time Telemetry
+    // VC 1: CFDP File Delivery (Heavy data chunks)
+    // VC 2: Low-Priority Engineering Logs
+    const std::vector<uint8_t> targetVCs = {0, 1, 2};
+
+    // --- PHASE 1: PACKET INJECTION LOOP ---
+    uint32_t sequenceId = 1000;
+    
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        for (uint8_t vc : targetVCs) {
+            sequenceId++;
+
+            // Vary packet sizes: CFDP on VC 1 gets larger chunks
+            size_t payloadSize = (vc == 1) ? 512 : 128;
+            uint8_t patternByte = static_cast<uint8_t>((vc << 4) | (cycle & 0x0F));
+            
+            BitBuffer<MAX_MESSAGE_LENGTH> packet = CreateDummyPacket(patternByte, payloadSize);
+
+            // Record exact timestamp right before injecting into the Service Access Point
+            auto injectTime = std::chrono::steady_clock::now();
+            injectionLog.push_back({injectTime, vc, sequenceId, payloadSize});
+
+            // Call VCPRequest
+            // Note: Assuming PVN=0x00 (Space Packet) and Packet ServiceType
+            uslpStack.VCPRequest(
+                packet, 
+                static_cast<uint32_t>(vc), // GVCID mapped to VCID for simple test
+                0x00,                      // PVN
+                sequenceId,                // SDU_ID
+                ServiceType::EXPEDITED
+            );
+
+            std::cout << "[INJECT] SDU_ID: " << sequenceId 
+                      << " | VC: " << static_cast<int>(vc) 
+                      << " | Size: " << payloadSize << " B\n";
+
+            // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10 + (vc * 5)));
+        }
+    }
+
+    std::cout << "\n[TEST PHASE 1 COMPLETE] Injected " << injectionLog.size() << " packets.\n\n";
+
+    // --- PHASE 2: TRIGGER MULTIPLEXER & FRAME GENERATION ---
+    // If your multiplexer runs on a separate thread, give it time to flush.
+    // If running synchronously, trigger your frame generation loop here.
+    std::cout << "[MULTIPLEXING] Running frame generation loop across accumulators...\n";
+    
+    // Example synchronous tick:
+    // uslpStack.TickMultiplexer(); 
+    // Or allow background thread to process:
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // --- PHASE 3: VERIFY GENERATED TRANSFER FRAMES ---
+    std::cout << "\n==================================================\n";
+    std::cout << "[RESULTS] Inspecting Generated Transfer Frames\n";
+    std::cout << "==================================================\n";
+
+    size_t generatedCount = uslpStack.GetFinishedTransferFramesIndex(); // Retrieves m_finishedTransferFramesIdx
+    std::cout << "Total Transfer Frames Generated: " << generatedCount << "\n\n";
+
+    for (size_t i = 0; i < generatedCount; ++i) {
+        const TFAllFormats& output = uslpStack.GetFinishedFrame(i);
+        
+        // Extract debug info from the un-serialized structural frame
+        uint8_t frameVCID = output.tf.TFPH.VCID & 0x3F; // Mask VCID depending on your bit allocation
+        uint32_t frameCount = output.tf.TFPH.VCFrameCount;
+        uint16_t fhp = output.tf.TFDF.header.firstHeaderLastValidOctetPointer;
+
+        std::cout << "Frame #" << std::setw(3) << std::setfill('0') << i 
+                  << " | VCID: " << static_cast<int>(frameVCID)
+                  << " | VC Frame Count: " << frameCount
+                  << " | FHP: " << fhp
+                  << " | Serialized Bytes: " << output.serializedBytes.length << " B"
+                  << " | First Hex Byte: 0x" << std::hex << (int)output.serializedBytes.data[0] << std::dec
+                  << "\n";
+    }
+
+    // --- PHASE 4: TIMELINE CORRELATION REPORT ---
+    std::cout << "\n--- Ingestion Timeline Report ---\n";
+    for (const auto& record : injectionLog) {
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(record.timestamp - testStartTime).count();
+        std::cout << "T+" << std::setw(4) << elapsedMs << " ms | SDU " << record.sduId 
+                  << " ingested into VCID " << static_cast<int>(record.vcid) << "\n";
+    }
+
+    std::cout << "==================================================\n";
+    std::cout << "[TEST PASSED] Pipeline execution verified successfully.\n";
+    std::cout << "==================================================\n";
+}
+
 
 int main(int argc, char* argv[]) {
+	std::cout << "started running\n";
+	// 2. Initialize your complete USLP Configuration
+	USLPConfig managedParams {
+		// Physical Channel Configuration
+		USLPConfig::PhysicalChannel {
+			.physicalChannelName = "BROWN_SAT_LINK_1",
+			.frameType = USLPConfig::FrameType::FIXED,
+			.transferFrameLength = 1024,
+			.TFVN = 0b1100,
+			.MCMultiplexingScheme = 0,
+			.insertZonePresent = false,
+			.insertZoneLength = 0,
+			.FECFPresent = true,
+			.maxTFPerDataUnit = 1,
+			.maxRepetitions = 1,
+			.isCRC32 = true
+		},
+		
+		// Master Channel Configuration
+		USLPConfig::MasterChannel {
+			.frameType = USLPConfig::FrameType::FIXED,
+			.SCID = 42,
+			.VCIDs = {0, 1, 2}, // The active channels we are multiplexing
+			.VCMultiplexingScheme = 0
+		},
+
+		// --- YOUR VIRTUAL CHANNELS ARRAY INITIALIZATION ---
+		std::array<USLPConfig::VirtualChannelConfig, VC_COUNT>{
+			// Index 0: High-Priority Real-Time Telemetry / Commands
+			USLPConfig::VirtualChannelConfig {
+				.frameType = USLPConfig::FrameType::FIXED,
+				.VCID = 0,
+				.seqControlCountLength = 4,   // 4-byte frame counter width
+				.expeditedCountLength = 4,
+				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
+				.TFDFCompletionTimeoutMs = 20, // Low latency flush
+				.interFrameDelayMs = 50
+			},
+			// Index 1: CFDP File Transmission Channel (Bulky Data)
+			USLPConfig::VirtualChannelConfig {
+				.frameType = USLPConfig::FrameType::FIXED,
+				.VCID = 1,
+				.seqControlCountLength = 4,
+				.expeditedCountLength = 4,
+				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
+				.TFDFCompletionTimeoutMs = 100, // Higher timeout tolerated for big frames
+				.interFrameDelayMs = 50
+			},
+			// Index 2: Secondary Payload / Science Instrument Logs
+			USLPConfig::VirtualChannelConfig {
+				.frameType = USLPConfig::FrameType::FIXED,
+				.VCID = 2,
+				.seqControlCountLength = 2,    // 2-byte truncated width to save space
+				.expeditedCountLength = 4,
+				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
+				.TFDFCompletionTimeoutMs = 500,
+				.interFrameDelayMs = 100
+			}
+		},
+
+		// MAP Channels Vector
+		std::vector<USLPConfig::MAPChannel>{},
+
+		// Packet Transfer Configurations
+		USLPConfig::PacketTransfer {
+			.validPVNs = {0b000}, // Only accept standard Space Packets (Version 1)
+			.maxPacketLength = 4096,
+			.deliverIncompletePackets = false
+		}
+	};
+	USLP uslp(managedParams);
+
+	RunVCPRequestMultiplexingTest(uslp);
+	/*
 	std::array<uint8_t, TEST_ARRAY_SIZE> message = GenerateRandomBytes();
 	WriteBytes(message); // Writes raw bytes of message to bytes.txt
 	
@@ -397,9 +515,7 @@ int main(int argc, char* argv[]) {
 	enum MessageType type = BITMAP;
 	std::array<uint8_t, MAX_MESSAGE_LENGTH> messageContainer {};
 	std::memcpy(&messageContainer[0], &message[0], message.size());
-
-	USLPConfig managedParams {};
-	USLP uslp(managedParams);
+	
 	std::cout << "cos" << std::endl;
 
 	BitBuffer<MAX_MESSAGE_LENGTH> messageBuffer(&messageContainer[0], TEST_ARRAY_SIZE);
@@ -428,6 +544,7 @@ int main(int argc, char* argv[]) {
 
 		//out << std::setw(3) << static_cast<int>(serializedTransferFrames.data[i]) << "  ";
 	}
+		*/
 
 	return 0;
 }

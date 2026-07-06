@@ -18,8 +18,9 @@
 constexpr uint16_t MAX_MESSAGE_LENGTH = 		UINT16_MAX; // Maximum size of a message a user can send (pre-serialization)
 constexpr uint8_t  VC_BITMASK = 				(1 << 6) - 1;
 constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; // Maximum size of the transfer frame creation queue
-constexpr uint8_t  VC_COUNT = 					2; 			// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
 constexpr uint16_t MAX_INCOMING_PACKETS =   	UINT16_MAX; // Max upper layer packets that can wait to be wrapped
+constexpr uint8_t  VC_COUNT = 					3; 			// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
+constexpr uint16_t  MAX_VC_COUNT = 				64; 		// 6 bit field in transfer frame so 2^6
 constexpr uint8_t  IDLE_VCID = 					63; 		// CCSDS standard
 constexpr uint8_t  DEFAULT_UPID = 				0b00000; 	// Indicates CFDP packets
 constexpr uint8_t  IDLE_UPID = 					0b11111; 	// Indicates Idle data
@@ -249,7 +250,7 @@ struct TFPrimaryHeader {
 	uint16_t spare;
 	bool operationalControlFieldFlag;
 	uint16_t VCFrameCountLength;
-	uint32_t VCFrameCountField;
+	uint32_t VCFrameCount;
 };
 
 //Complete black box
@@ -260,7 +261,7 @@ struct TFInsertZone {
 struct TFDFHeader {
 	uint8_t TFDZConstructionRules;
 	uint8_t USLPProtocolIdentifier;
-	uint16_t FirstHeaderLastValidOctetPointer;
+	uint16_t firstHeaderLastValidOctetPointer;
 };
 
 struct TFDataField {

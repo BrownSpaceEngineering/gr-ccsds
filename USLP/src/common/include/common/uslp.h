@@ -22,6 +22,16 @@
 #include <chrono>
 #include <mutex>
 
+bool m_enableLogs = true;
+
+template <typename... Args>
+void log(Args&&... args) {
+    if (!m_enableLogs) return;
+
+    // C++17 Fold-expression: unpacks and prints every parameter sequentially
+    (std::cout << ... << std::forward<Args>(args)) << "\n";
+}
+
 class VirtualChannelAccumulator {
 private:
     uint8_t m_vcid;
@@ -45,6 +55,7 @@ public:
 
     // Handled by VCP.request
     void processIncomingPacket(const BitBuffer<MAX_MESSAGE_LENGTH>& packetBytes, uint32_t GVCID) {
+        std::cout << "VCPRequest\n";
         std::lock_guard<std::mutex> lock(m_bufferMtx);
         
         m_lastPacketTime = std::chrono::steady_clock::now();
@@ -53,7 +64,14 @@ public:
 };
 
 class VirtualChannel {
-private:
+public:
+    VirtualChannel(uint8_t vcFrameCountLength = VC_FRAME_COUNT_LENGTH, 
+        size_t fixedTfdfSize = MAX_DATA_FIELD_LENGTH)
+        : accumulator(fixedTfdfSize)
+    {
+        initializeMask(vcFrameCountLength);
+    }
+
     void initializeMask(uint8_t vcFrameCountLength) {
         // Clamp length between 1 and 7 per USLP spec safety
         //vcFrameCountLength = std::clamp<uint8_t>(vcFrameCountLength, 1, 7);
@@ -70,13 +88,6 @@ private:
             vcFrameCountMask = (1ULL << (vcFrameCountLength * 8)) - 1;
         }
     }
-public:
-    VirtualChannel(uint8_t vcFrameCountLength = VC_FRAME_COUNT_LENGTH, 
-        size_t fixedTfdfSize = MAX_DATA_FIELD_LENGTH)
-        : accumulator(fixedTfdfSize)
-    {
-        initializeMask(vcFrameCountLength);
-    }
 
     void incrementFrameCount() {
         vcFrameCount++;
@@ -90,16 +101,53 @@ public:
     uint64_t vcFrameCount = 0;
 };
 
+static constexpr int maxFinishedTransferFrames = 1024;
+
 struct TFAllFormats {
     TransferFrame tf;
-    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes;
+    BitBuffer<maxFinishedTransferFrames> serializedBytes;
 };
-
-static constexpr int maxFinishedTransferFrames = 1024;
 
 class USLP {
 public:
-    USLP(USLPConfig& managedParams) : packer(managedParams) {};
+    USLP(USLPConfig& managedParams) 
+        : packer(managedParams), 
+          managedParams(managedParams),
+          m_running(true) 
+    {
+        for (size_t vc = 0; vc < VC_COUNT; ++vc) {
+            // Read parameters calculated above
+            uint8_t byteWidth = managedParams.virtualChannelConfigs[vc].expeditedCountLength;
+            
+            virtualChannels[vc].initializeMask(byteWidth);
+            virtualChannels[vc].expirationTime = std::chrono::milliseconds(managedParams.virtualChannelConfigs[vc].TFDFCompletionTimeoutMs);
+        }
+
+        virtualChannels[IDLE_VCID].initializeMask(6);
+        virtualChannels[IDLE_VCID].expirationTime = std::chrono::milliseconds(50);
+
+        // Spawning threads at the VERY END of constructor to ensure all members 
+        // (packer, queues, virtualChannels) are fully initialized in memory first.
+        m_packetThread = std::thread(&USLP::VCPacketThread, this);
+        m_multiplexerThread = std::thread(&USLP::VCMultiplexer, this);
+    }
+
+    ~USLP() {
+        // 1. Signal threads to exit their main while(m_running) loops
+        m_running = false;
+
+        // Note: If m_frameMultiplexerQueue uses a blocking wait condition variable,
+        // you should call a wake/unblock function here (e.g., m_frameMultiplexerQueue.unblock())
+        // so VCMultiplexer wakes up immediately to see m_running == false.
+
+        // 2. Safely join threads before memory cleanup occurs
+        if (m_packetThread.joinable()) {
+            m_packetThread.join();
+        }
+        if (m_multiplexerThread.joinable()) {
+            m_multiplexerThread.join();
+        }
+    }
 
     TFPrimaryHeader GetPrimaryHeader(uint8_t VCID);
     TFInsertZone GetInsertZone();
@@ -141,13 +189,33 @@ public:
         uint16_t fhp,
         uint8_t UPID);
     void AllFramesGenerationFunction(TransferFrame& tf);
+    uint64_t GetFinishedTransferFramesIndex() {
+        return m_finishedTransferFramesIdx;
+    };
+    TFAllFormats GetFinishedFrame(int i) {
+        if (i < 0 || i >= m_finishedTransferFramesIdx) {
+            std::cerr << "[ERROR] USLP::GetFinishedFrame - Index (" << i 
+                    << ") is out of bounds. Most recent valid index is " 
+                    << (m_finishedTransferFramesIdx - 1) << "\n";
+            
+            // 2. Return a safe, empty/default object instead of reading random memory
+            return TFAllFormats{}; 
+        }
+        
+        // 3. Safe, verified in-bounds read
+        return m_finishedTransferFrames[i];
+    };
 private:
     USLPPacker packer;
     USLPConfig managedParams;
-    std::array<VirtualChannel, VC_COUNT> virtualChannels;
+    std::array<VirtualChannel, MAX_VC_COUNT> virtualChannels{};
     ThreadSafeMultiplexerQueue<TransferFrame> m_frameMultiplexerQueue;
     std::array<TFAllFormats, maxFinishedTransferFrames> m_finishedTransferFrames;
     uint64_t m_finishedTransferFramesIdx = 0;
 
     bool m_running = true;
+
+    // Thread handles
+    std::thread m_packetThread;
+    std::thread m_multiplexerThread;
 };

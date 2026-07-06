@@ -58,8 +58,8 @@ struct USLPConfig {
         uint8_t VCMultiplexingScheme;              // USLP-127
     };
 
-    struct VirtualChannel {
-        FrameType frameType;                       // USLP-128 (Can either be fixed or variable in length)
+    struct VirtualChannelConfig {
+        FrameType frameType = FrameType::FIXED;    // USLP-128 (Can either be fixed or variable in length)
         uint8_t VCID;                              // USLP-129
 
         uint8_t seqControlCountLength;             // USLP-130 (<= 56 bits) (VC Count Length for Sequence Control QoS)
@@ -72,7 +72,7 @@ struct USLPConfig {
         std::vector<uint8_t> MAPIDs;               // USLP-135 (0–15 of them)
         uint8_t MAPMultiplexingScheme;             // USLP-136 (optional)
 
-        uint16_t truncatedFrameLength;             // USLP-137 (I do not understand what is being truncated)
+        uint16_t truncatedFrameLength;             // USLP-137 (I do not understand when the frame would be truncated)
         SDUType SDUType = SDUType::CCSDS_PACKET;   // USLP-138 (Data field content, which can carry our desired messages or other services)
 
         bool OCFAllowed;                           // USLP-139 (variable-length TF)
@@ -99,7 +99,7 @@ struct USLPConfig {
 
     PhysicalChannel physical;
     MasterChannel master;
-    std::array<VirtualChannel, VC_COUNT> virtualChannels;
+    std::array<VirtualChannelConfig, VC_COUNT> virtualChannelConfigs;
     std::vector<MAPChannel> mapChannels;
     PacketTransfer packet;
 };
