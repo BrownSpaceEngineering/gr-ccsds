@@ -17,6 +17,7 @@
 #include <common/utils.h>
 #include <common/uslpstructs.h>
 #include <string>
+#include <string_view>
 #include <set>
 #include <cstdint>
 #include <chrono>
@@ -108,23 +109,48 @@ struct TFAllFormats {
     BitBuffer<maxFinishedTransferFrames> serializedBytes;
 };
 
+// Helper utility to convert the COP enum class into a string_view
+std::string_view ToString(USLPConfig::COPType type) {
+    switch (type) {
+        case USLPConfig::COPType::COP_1: return "COP_1";
+        case USLPConfig::COPType::COP_P: return "COP_P";
+        case USLPConfig::COPType::NONE:  return "NONE";
+        default:                         return "UNKNOWN";
+    }
+}
+
 class USLP {
 public:
     USLP(USLPConfig& managedParams) 
-        : packer(managedParams), 
+        : packer(managedParams, m_vcidToIndex), 
           managedParams(managedParams),
           m_running(true) 
     {
-        for (size_t vc = 0; vc < VC_COUNT; ++vc) {
+        PrintVirtualChannelConfigs();
+
+        m_vcidToIndex.fill(-1);
+
+        for (size_t i = 0; i < VC_COUNT; i++) {
+            uint8_t targetVCID = managedParams.virtualChannelConfigs[i].VCID; // e.g., 0, 1, 2
+        
+            // Map the VCID to this exact index 'i' in our dense array
+            m_vcidToIndex[targetVCID] = static_cast<int8_t>(i);
+
             // Read parameters calculated above
-            uint8_t byteWidth = managedParams.virtualChannelConfigs[vc].expeditedCountLength;
+            uint8_t byteWidth = managedParams.virtualChannelConfigs[i].expeditedCountLength;
             
-            virtualChannels[vc].initializeMask(byteWidth);
-            virtualChannels[vc].expirationTime = std::chrono::milliseconds(managedParams.virtualChannelConfigs[vc].TFDFCompletionTimeoutMs);
+            m_virtualChannels[i].initializeMask(byteWidth);
+            m_virtualChannels[i].expirationTime = std::chrono::milliseconds(managedParams.virtualChannelConfigs[i].TFDFCompletionTimeoutMs);
         }
 
-        virtualChannels[IDLE_VCID].initializeMask(6);
-        virtualChannels[IDLE_VCID].expirationTime = std::chrono::milliseconds(50);
+        // 3. Setup the IDLE channel in the final slot
+        size_t idleIndex = NUM_ACTIVE_CHANNELS - 1;
+        m_vcidToIndex[IDLE_VCID] = static_cast<int8_t>(idleIndex);
+        
+        m_virtualChannels[idleIndex].initializeMask(6);
+        m_virtualChannels[idleIndex].expirationTime = std::chrono::milliseconds(50);
+
+        PrintVCIDMapping();
 
         // Spawning threads at the VERY END of constructor to ensure all members 
         // (packer, queues, virtualChannels) are fully initialized in memory first.
@@ -148,6 +174,31 @@ public:
             m_multiplexerThread.join();
         }
     }
+
+    void PrintVCIDMapping();
+
+
+    void PrintVirtualChannelConfigs() const {
+        std::cout << "\n=============================================\n";
+        std::cout << "       USLP VIRTUAL CHANNEL CONFIGURATIONS    \n";
+        std::cout << "=============================================\n";
+
+        // Grab the configuration array directly via your class reference member
+        const auto& configs = managedParams.virtualChannelConfigs;
+
+        for (size_t i = 0; i < configs.size(); ++i) {
+            const auto& config = configs[i];
+            
+            std::cout << "  Config Index [" << i << "]:"
+                    << "  VCID = " << static_cast<int>(config.VCID)
+                    << "  |  COP Type = " << ToString(config.COPInEffect) 
+                    << "\n";
+        }
+
+        std::cout << "=============================================\n\n";
+    };
+
+
 
     TFPrimaryHeader GetPrimaryHeader(uint8_t VCID);
     TFInsertZone GetInsertZone();
@@ -189,6 +240,8 @@ public:
         uint16_t fhp,
         uint8_t UPID);
     void AllFramesGenerationFunction(TransferFrame& tf);
+
+    //int8_t GetChannelByVCID(uint8_t vcid); // Returns the channel index of the VCID, -1 if invalid
     uint64_t GetFinishedTransferFramesIndex() {
         return m_finishedTransferFramesIdx;
     };
@@ -206,9 +259,10 @@ public:
         return m_finishedTransferFrames[i];
     };
 private:
+    std::array<int8_t, MAX_VC_COUNT> m_vcidToIndex{5};
     USLPPacker packer;
     USLPConfig managedParams;
-    std::array<VirtualChannel, MAX_VC_COUNT> virtualChannels{};
+    std::array<VirtualChannel, NUM_ACTIVE_CHANNELS> m_virtualChannels{};
     ThreadSafeMultiplexerQueue<TransferFrame> m_frameMultiplexerQueue;
     std::array<TFAllFormats, maxFinishedTransferFrames> m_finishedTransferFrames;
     uint64_t m_finishedTransferFramesIdx = 0;

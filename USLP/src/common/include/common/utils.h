@@ -18,6 +18,7 @@
 
 constexpr int TEST_ARRAY_SIZE = 3009;
 
+int8_t GetChannelByVCID(uint8_t vcid, std::array<int8_t, MAX_VC_COUNT> &mapping); // Returns the channel index of the VCID, -1 if invalid
 void printBytes(uint64_t value);
 template <size_t M, size_t N> void append(const BitBuffer<M>& src, BitBuffer<N>& dest, size_t& offset);
 std::array<uint8_t, 4> CRCGenerator();

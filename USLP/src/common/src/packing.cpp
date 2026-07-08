@@ -97,8 +97,14 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField& tfdf) {
 }
 
 BitBuffer<OCF_DATA_LENGTH> USLPPacker::packOperationalControlField(OperationalControlField ocf, uint8_t VCID) {
-	if (managedParams.virtualChannelConfigs[VCID].COPInEffect != USLPConfig::COPType::NONE) {
+	int index = GetChannelByVCID(VCID, m_vcidToIndex);
+    //std::cout << "\n";
+    //std::cout << "VCID: " << static_cast<uint32_t>(VCID) << "\n";
+    //std::cout << "index" << index;
+    
+    if ((index != -1) && (managedParams.virtualChannelConfigs[index].COPInEffect != USLPConfig::COPType::NONE)) {
         uint32_t packed = 0;
+        std::cout << "WHY ARE WE HERE\n";
 
         packed |= ((uint32_t)(ocf.SDUType)) << 29;
         packed |= ((uint32_t)(ocf.OCFData));
@@ -134,7 +140,9 @@ BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame
     //std::cout << "\n";
 	BitBuffer<MAX_INSERT_ZONE_LENGTH> packedInsertZone = packInsertZone(tf.TFIZ);
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packedDataField = packDataField(tf.TFDF);
+    std::cout << tf.TFDF.TFDZ.length;
 	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF, tf.TFPH.VCID);
+    tf.TFPH.VCID = 0;
 	BitBuffer<FECF_DATA_LENGTH> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);
 
 	size_t offset = 0;
@@ -144,7 +152,9 @@ BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame
 	append(packedDataField, packed, offset);
 	append(packedOperationalControlField, packed, offset);
 	append(packedFrameErrorControlField, packed, offset);
-
+    if (tf.TFPH.VCID == 63) {
+		std::cout << "finished idle packing\n";
+	}
 	packed.length = offset;
 
 	return packed;

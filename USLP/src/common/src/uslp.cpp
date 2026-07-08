@@ -20,6 +20,31 @@
 
 //#include "CRC.h"
 
+void USLP::PrintVCIDMapping() {
+	std::cout << "\n=============================================\n";
+	std::cout << "      USLP VCID TO INTERNAL INDEX MAP        \n";
+	std::cout << "=============================================\n";
+	
+	bool hasMappings = false;
+
+	for (size_t vcid = 0; vcid < MAX_VC_COUNT; ++vcid) {
+		int8_t internalIndex = m_vcidToIndex[vcid];
+
+		// Only print slots that have been explicitly mapped to a dense array index
+		if (internalIndex != -1) {
+			std::cout << "  Protocol VCID [" << std::setw(2) << std::setfill('0') << vcid << "]"
+					<< "  ---->  Internal Storage Index [" << static_cast<int>(internalIndex) << "]\n";
+			hasMappings = true;
+		}
+	}
+
+	if (!hasMappings) {
+		std::cout << "  [WARNING] No Virtual Channels are currently mapped!\n";
+	}
+
+	std::cout << "=============================================\n\n";
+}
+
 TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	TFPrimaryHeader tfph;
 	tfph.TFVN = managedParams.physical.TFVN; // Just carries the current version
@@ -35,8 +60,18 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	tfph.operationalControlFieldFlag = 0; // No OCF because no COP
 	log("GetPrimaryHeader");
 	log(static_cast<uint32_t>(VCID));
-	tfph.VCFrameCountLength = managedParams.virtualChannelConfigs[VCID].expeditedCountLength;
-	tfph.VCFrameCount = virtualChannels[VCID].vcFrameCount;
+	int8_t vcidIndex = GetChannelByVCID(VCID, m_vcidToIndex);
+
+	if (vcidIndex < 0) { // Temporary solution, maybe best thing to do is invalidate the frame?
+		tfph.VCFrameCountLength = 4;
+		tfph.VCFrameCount = 1;
+	} else {
+		tfph.VCFrameCountLength = managedParams.virtualChannelConfigs[vcidIndex].expeditedCountLength;
+		tfph.VCFrameCount = m_virtualChannels[vcidIndex].vcFrameCount;
+		log("vc frame count length: ", tfph.VCFrameCountLength);
+		log("vc frame count: ", tfph.VCFrameCount);
+	}
+
 	log("GetPrimaryHeader2");
 
 	return tfph;
@@ -76,20 +111,6 @@ BitBuffer<MAX_SECURITY_TRAILER_LENGTH> USLP::GetSecurityTrailer() {
 
 	return trailer;
 };
-
-TFDataField USLP::GetDataField(BitBuffer<MAX_DATA_FIELD_LENGTH> data, uint32_t GVCID) {
-	TFDataField tfdf;
-	//tfdf.securityHeader = GetSecurityHeader();
-
-	// Placeholder values
-	TFDFHeader header {6, 0, 2};
-	tfdf.header = header;
-	tfdf.TFDZ = data;
-	//tfdf.securityTrailer = GetSecurityTrailer();
-	//std::cout << "security trailer length on init: " << tfdf.securityTrailer.length << std::endl;
-
-	return tfdf;
-}
 
 OperationalControlField USLP::GetOperationalControlField(USLPContext context) {
 	OperationalControlField ocf {};
@@ -136,7 +157,7 @@ void USLP::VCPRequest(
 	uint8_t VCID = static_cast<uint8_t>(VC_BITMASK & GVCID);
 
 	if (VCID < VC_COUNT) {
-		VirtualChannelAccumulator& accumulator = virtualChannels[VCID].accumulator;
+		VirtualChannelAccumulator& accumulator = m_virtualChannels[VCID].accumulator;
 		accumulator.processIncomingPacket(packet, GVCID);
 	} else {
 		std::cerr << "Invalid GVCID provided\n";
@@ -163,8 +184,9 @@ void USLP::VCMultiplexer() {
             BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
             idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
             
-			std::cout << "prepare transfer frame frame\n";
+			std::cout << "prepare idle frame\n";
 			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+			log("finished idle frame");
         }
 	}
 }
@@ -176,13 +198,15 @@ void USLP::VCPacketThread() {
 	while (m_running) {
 		auto nextTick = std::chrono::steady_clock::now() + TICK_RATE;
 		bool frameGeneratedThisTick = false;
+		log("Packet thread");
 
 		// Potential issue with current system where if a virtual channel receives a constant
 		// stream, others will never be processed
-		for (size_t vc = 0; vc < VC_COUNT; vc++) {
-			VirtualChannelAccumulator& acc = virtualChannels[vc].accumulator;
+		for (size_t vc = 0; vc < m_virtualChannels.size() - 1; vc++) {
+			int8_t vcidIndex = GetChannelByVCID(vc, m_vcidToIndex);
+			VirtualChannelAccumulator& acc = m_virtualChannels[vcidIndex].accumulator;
 			auto timeSinceFrame = std::chrono::steady_clock::now() - acc.m_lastFrameTime;
-			bool transferFrameDue = (timeSinceFrame > virtualChannels[vc].expirationTime) && 
+			bool transferFrameDue = (timeSinceFrame > m_virtualChannels[vcidIndex].expirationTime) && 
 									(acc.m_accumulationBuffer.payloadBuffer.length > 0);
 			bool bufferReady = acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdfSize;
 
@@ -231,6 +255,8 @@ void USLP::VCPacketThread() {
 						tfdfPayload.fill(tfdfPayload.length, 0x00, paddingNeeded);
 					}
 
+					std::cout << "num bytes in payload: " << tfdfPayload.length << "\n";
+
 					// 3. NOW it is safe to erase the bytes from the accumulator
 					payloadBuffer.eraseFromStart(numBytesToWrap);
 
@@ -238,8 +264,9 @@ void USLP::VCPacketThread() {
 					acc.m_lastFrameTime = std::chrono::steady_clock::now();
 					transferFrameDue = false;
 
+					std::cout << "fhp for normal frame: " << fhp << "\n";
 					PrepareTransferFrame(tfdfPayload, vc, fhp, DEFAULT_UPID);
-					virtualChannels[vc].incrementFrameCount();
+					m_virtualChannels[vcidIndex].incrementFrameCount();
 					frameGeneratedThisTick = true;
 					
 					// Break the while loop if we don't have enough data for another full frame
@@ -271,6 +298,7 @@ void USLP::PrepareTransferFrame(
 		m_frameMultiplexerQueue.push(std::move(tf));
 	} else if (UPID == IDLE_UPID) {
 		AllFramesGenerationFunction(tf);
+		std::cout << "OID all frames generation hs been finshed\n";
 	}
 }
 
@@ -307,8 +335,10 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 
 	m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};
 	m_finishedTransferFramesIdx++;
+	if (tf.TFPH.VCID == 63) {
+		log("Finished Idle AllFramesGenerationFunction");
+	}
 }
-
 
 // Structure to log exactly when a packet entered the USLP stack via VCPRequest
 struct PacketInjectionRecord {
@@ -361,13 +391,15 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 
             // Call VCPRequest
             // Note: Assuming PVN=0x00 (Space Packet) and Packet ServiceType
-            uslpStack.VCPRequest(
-                packet, 
-                static_cast<uint32_t>(vc), // GVCID mapped to VCID for simple test
-                0x00,                      // PVN
-                sequenceId,                // SDU_ID
-                ServiceType::EXPEDITED
-            );
+			if (false) {
+				uslpStack.VCPRequest(
+					packet, 
+					static_cast<uint32_t>(vc), // GVCID mapped to VCID for simple test
+					0x00,                      // PVN
+					sequenceId,                // SDU_ID
+					ServiceType::EXPEDITED
+				);
+			}
 
             std::cout << "[INJECT] SDU_ID: " << sequenceId 
                       << " | VC: " << static_cast<int>(vc) 
@@ -457,17 +489,7 @@ int main(int argc, char* argv[]) {
 		},
 
 		// --- YOUR VIRTUAL CHANNELS ARRAY INITIALIZATION ---
-		std::array<USLPConfig::VirtualChannelConfig, VC_COUNT>{
-			// Index 0: High-Priority Real-Time Telemetry / Commands
-			USLPConfig::VirtualChannelConfig {
-				.frameType = USLPConfig::FrameType::FIXED,
-				.VCID = 0,
-				.seqControlCountLength = 4,   // 4-byte frame counter width
-				.expeditedCountLength = 4,
-				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
-				.TFDFCompletionTimeoutMs = 20, // Low latency flush
-				.interFrameDelayMs = 50
-			},
+		std::array<USLPConfig::VirtualChannelConfig, NUM_ACTIVE_CHANNELS>{
 			// Index 1: CFDP File Transmission Channel (Bulky Data)
 			USLPConfig::VirtualChannelConfig {
 				.frameType = USLPConfig::FrameType::FIXED,
@@ -478,10 +500,30 @@ int main(int argc, char* argv[]) {
 				.TFDFCompletionTimeoutMs = 100, // Higher timeout tolerated for big frames
 				.interFrameDelayMs = 50
 			},
+			// Index 0: High-Priority Real-Time Telemetry / Commands
+			USLPConfig::VirtualChannelConfig {
+				.frameType = USLPConfig::FrameType::FIXED,
+				.VCID = 0,
+				.seqControlCountLength = 4,   // 4-byte frame counter width
+				.expeditedCountLength = 4,
+				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
+				.TFDFCompletionTimeoutMs = 20, // Low latency flush
+				.interFrameDelayMs = 50
+			},
 			// Index 2: Secondary Payload / Science Instrument Logs
 			USLPConfig::VirtualChannelConfig {
 				.frameType = USLPConfig::FrameType::FIXED,
 				.VCID = 2,
+				.seqControlCountLength = 2,    // 2-byte truncated width to save space
+				.expeditedCountLength = 4,
+				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
+				.TFDFCompletionTimeoutMs = 500,
+				.interFrameDelayMs = 100
+			},
+			// Index 3: OID
+			USLPConfig::VirtualChannelConfig {
+				.frameType = USLPConfig::FrameType::FIXED,
+				.VCID = 63,
 				.seqControlCountLength = 2,    // 2-byte truncated width to save space
 				.expeditedCountLength = 4,
 				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,

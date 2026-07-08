@@ -99,7 +99,7 @@ struct USLPConfig {
 
     PhysicalChannel physical;
     MasterChannel master;
-    std::array<VirtualChannelConfig, VC_COUNT> virtualChannelConfigs;
+    std::array<VirtualChannelConfig, NUM_ACTIVE_CHANNELS> virtualChannelConfigs;
     std::vector<MAPChannel> mapChannels;
     PacketTransfer packet;
 };

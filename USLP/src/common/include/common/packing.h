@@ -13,10 +13,12 @@
 #include <fstream>
 #include <iomanip>
 #include <common/uslpstructs.h>
+#include <common/utils.h>
 
 class USLPPacker {
 public:
-    USLPPacker(USLPConfig& config) : managedParams(config) {}
+    USLPPacker(USLPConfig& config, std::array<int8_t, MAX_VC_COUNT>& vcidMap)
+        : managedParams(config), m_vcidToIndex(vcidMap) {}
 
     template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_t numBytes);
     BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph);
@@ -29,4 +31,5 @@ public:
 
 private:
     USLPConfig& managedParams;
+    std::array<int8_t, MAX_VC_COUNT> &m_vcidToIndex;
 };

@@ -14,20 +14,21 @@
 #include <iomanip>
 
 // Upper Level Macros
-#define MAX_TF_PER_MESSAGE						65 			// Most transfer frames we will ever use for one message
-constexpr uint16_t MAX_MESSAGE_LENGTH = 		UINT16_MAX; // Maximum size of a message a user can send (pre-serialization)
+#define MAX_TF_PER_MESSAGE						65 				// Most transfer frames we will ever use for one message
+constexpr uint16_t MAX_MESSAGE_LENGTH = 		UINT16_MAX; 	// Maximum size of a message a user can send (pre-serialization)
 constexpr uint8_t  VC_BITMASK = 				(1 << 6) - 1;
-constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; // Maximum size of the transfer frame creation queue
-constexpr uint16_t MAX_INCOMING_PACKETS =   	UINT16_MAX; // Max upper layer packets that can wait to be wrapped
-constexpr uint8_t  VC_COUNT = 					3; 			// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
-constexpr uint16_t  MAX_VC_COUNT = 				64; 		// 6 bit field in transfer frame so 2^6
-constexpr uint8_t  IDLE_VCID = 					63; 		// CCSDS standard
-constexpr uint8_t  DEFAULT_UPID = 				0b00000; 	// Indicates CFDP packets
-constexpr uint8_t  IDLE_UPID = 					0b11111; 	// Indicates Idle data
-constexpr uint8_t  IDLE_PATTERN = 				0x55;		// For OID frames
-constexpr uint8_t  DEFAULT_CONSTRUCTION_RULE = 	0; 			// For TFDF
-constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		4; 			// 4 bytes of sequence number per frame
-constexpr uint16_t DEFAULT_FHP =				2047;		// Default First Header Pointer
+constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; 	// Maximum size of the transfer frame creation queue
+constexpr uint16_t MAX_INCOMING_PACKETS =   	UINT16_MAX; 	// Max upper layer packets that can wait to be wrapped
+constexpr uint8_t  VC_COUNT = 					3; 				// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
+constexpr uint8_t  NUM_ACTIVE_CHANNELS = 		VC_COUNT + 1;	// VCs and the OID channel
+constexpr uint8_t  IDLE_VCID = 					63; 			// CCSDS standard
+constexpr uint16_t MAX_VC_COUNT = 				64; 			// 6 bit field in transfer frame so 2^6
+constexpr uint8_t  DEFAULT_UPID = 				0b00000; 		// Indicates CFDP packets
+constexpr uint8_t  IDLE_UPID = 					0b11111; 		// Indicates Idle data
+constexpr uint8_t  IDLE_PATTERN = 				0x55;			// For OID frames
+constexpr uint8_t  DEFAULT_CONSTRUCTION_RULE = 	0; 				// For TFDF
+constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		4; 				// 4 bytes of sequence number per frame
+constexpr uint16_t DEFAULT_FHP =				2047;			// Default First Header Pointer
 
 // Transfer Frame Data Lengths in bytes
 #define ZERO								0

@@ -14,6 +14,15 @@
 #include <common/utils.h>
 //#include "CRC.h"
 
+int8_t GetChannelByVCID(uint8_t vcid, std::array<int8_t, MAX_VC_COUNT> &mapping) {
+	if (vcid >= MAX_VC_COUNT) {
+		std::cerr << "Invalid vcid\n";
+		return -1; // Out of bounds safety
+	}
+	
+	return mapping[vcid];
+};
+
 void printBytes(uint64_t value) {
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&value);
     for (int i = sizeof(uint64_t) - 1; i >= 0; --i) {
