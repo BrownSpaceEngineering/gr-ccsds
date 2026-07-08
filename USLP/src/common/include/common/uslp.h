@@ -23,11 +23,11 @@
 #include <chrono>
 #include <mutex>
 
-bool m_enableLogs = true;
+bool enableLogs = false;
 
 template <typename... Args>
 void log(Args&&... args) {
-    if (!m_enableLogs) return;
+    if (!enableLogs) return;
 
     // C++17 Fold-expression: unpacks and prints every parameter sequentially
     (std::cout << ... << std::forward<Args>(args)) << "\n";
@@ -159,6 +159,10 @@ public:
     }
 
     ~USLP() {
+        terminateThreads();
+    }
+
+    void terminateThreads() {
         // 1. Signal threads to exit their main while(m_running) loops
         m_running = false;
 
@@ -173,11 +177,8 @@ public:
         if (m_multiplexerThread.joinable()) {
             m_multiplexerThread.join();
         }
-    }
-
+    };
     void PrintVCIDMapping();
-
-
     void PrintVirtualChannelConfigs() const {
         std::cout << "\n=============================================\n";
         std::cout << "       USLP VIRTUAL CHANNEL CONFIGURATIONS    \n";

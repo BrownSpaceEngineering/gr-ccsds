@@ -50,6 +50,7 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	tfph.TFVN = managedParams.physical.TFVN; // Just carries the current version
 	tfph.SCID = managedParams.master.SCID; // Constant we decide on when the mission launches
 	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
+	std::cout << "VCID assigned: " << static_cast<uint32_t>(VCID) << "\n";
 	tfph.VCID = VCID;
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
 	tfph.endTFPrimaryHeaderFlag = 0; // Decided possibly if we need super fast transfer of packet
@@ -64,7 +65,7 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 
 	if (vcidIndex < 0) { // Temporary solution, maybe best thing to do is invalidate the frame?
 		tfph.VCFrameCountLength = 4;
-		tfph.VCFrameCount = 1;
+		tfph.VCFrameCount = 0;
 	} else {
 		tfph.VCFrameCountLength = managedParams.virtualChannelConfigs[vcidIndex].expeditedCountLength;
 		tfph.VCFrameCount = m_virtualChannels[vcidIndex].vcFrameCount;
@@ -152,12 +153,13 @@ void USLP::VCPRequest(
 		std::cerr << "Invalid PVN provided\n";
 		return;
 	}
-	log("VCPRequest");
+	//log("VCPRequest");
 
 	uint8_t VCID = static_cast<uint8_t>(VC_BITMASK & GVCID);
+	int8_t vcidIndex = GetChannelByVCID(VCID, m_vcidToIndex);
 
-	if (VCID < VC_COUNT) {
-		VirtualChannelAccumulator& accumulator = m_virtualChannels[VCID].accumulator;
+	if (vcidIndex >= 0) {
+		VirtualChannelAccumulator& accumulator = m_virtualChannels[vcidIndex].accumulator;
 		accumulator.processIncomingPacket(packet, GVCID);
 	} else {
 		std::cerr << "Invalid GVCID provided\n";
@@ -171,29 +173,32 @@ void USLP::VCMultiplexer() {
 	while (m_running) {
 		TransferFrame frameToProcess;
         
-		std::cout << "popping\n";
+		log("popping");
 		bool receivedRealFrame = m_frameMultiplexerQueue.pop_with_timeout(frameToProcess, TICK_RATE);
-        std::cout << "popped\n";
+        log("popped");
 		// This will block safely without burning CPU cycles until
         // PrepareTransferFrame notifies the condition variable.
         if (receivedRealFrame) {
-			std::cout << "received real frame\n";
+			log("received real frame\n");
 			AllFramesGenerationFunction(frameToProcess);
         } else {
             // CASE B: 20ms passed with absolutely zero activity. Generate OID.
             BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
             idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
             
-			std::cout << "prepare idle frame\n";
-			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+			log("prepare idle frame");
+			//PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
 			log("finished idle frame");
         }
 	}
+
+	std::cout << "leaving VCMultiplexer\n";
 }
 
 // Handles both wrapping packets in Transfer Frames and Multiplexing finished Transfer Frames
 void USLP::VCPacketThread() {
 	constexpr auto TICK_RATE = std::chrono::milliseconds(20);
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
 	while (m_running) {
 		auto nextTick = std::chrono::steady_clock::now() + TICK_RATE;
@@ -255,7 +260,7 @@ void USLP::VCPacketThread() {
 						tfdfPayload.fill(tfdfPayload.length, 0x00, paddingNeeded);
 					}
 
-					std::cout << "num bytes in payload: " << tfdfPayload.length << "\n";
+					//std::cout << "num bytes in payload: " << tfdfPayload.length << "\n";
 
 					// 3. NOW it is safe to erase the bytes from the accumulator
 					payloadBuffer.eraseFromStart(numBytesToWrap);
@@ -264,7 +269,9 @@ void USLP::VCPacketThread() {
 					acc.m_lastFrameTime = std::chrono::steady_clock::now();
 					transferFrameDue = false;
 
-					std::cout << "fhp for normal frame: " << fhp << "\n";
+					//std::cout << "fhp for normal frame: " << fhp << "\n";
+					std::cout << "vc in packet thread: " << vc << "\n";
+					std::cout << "payload byte: " << static_cast<uint32_t>(tfdfPayload.data[0]) << "\n";
 					PrepareTransferFrame(tfdfPayload, vc, fhp, DEFAULT_UPID);
 					m_virtualChannels[vcidIndex].incrementFrameCount();
 					frameGeneratedThisTick = true;
@@ -281,6 +288,8 @@ void USLP::VCPacketThread() {
 		std::this_thread::sleep_until(nextTick);
 	}
 
+	std::cout << "leaving VCPacketThread\n";
+
 	return;
 }
 
@@ -294,11 +303,11 @@ void USLP::PrepareTransferFrame(
 	TransferFrame tf = VCGeneration(tfdf, VCID);
 
 	if (UPID == DEFAULT_UPID) {
-		std::cout << "Pushing into multiplexer queue\n";
+		//std::cout << "Pushing into multiplexer queue\n";
 		m_frameMultiplexerQueue.push(std::move(tf));
 	} else if (UPID == IDLE_UPID) {
 		AllFramesGenerationFunction(tf);
-		std::cout << "OID all frames generation hs been finshed\n";
+		//std::cout << "OID all frames generation hs been finshed\n";
 	}
 }
 
@@ -352,9 +361,11 @@ struct PacketInjectionRecord {
 BitBuffer<MAX_MESSAGE_LENGTH> CreateDummyPacket(uint8_t fillByte, size_t numBytes) {
     BitBuffer<MAX_MESSAGE_LENGTH> packet;
     packet.length = numBytes;
+
     for (size_t i = 0; i < numBytes; ++i) {
         packet.data[i] = fillByte;
     }
+
     return packet;
 }
 
@@ -382,6 +393,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
             // Vary packet sizes: CFDP on VC 1 gets larger chunks
             size_t payloadSize = (vc == 1) ? 512 : 128;
             uint8_t patternByte = static_cast<uint8_t>((vc << 4) | (cycle & 0x0F));
+			std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << "\n";
             
             BitBuffer<MAX_MESSAGE_LENGTH> packet = CreateDummyPacket(patternByte, payloadSize);
 
@@ -391,7 +403,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 
             // Call VCPRequest
             // Note: Assuming PVN=0x00 (Space Packet) and Packet ServiceType
-			if (false) {
+			if (true) {
 				uslpStack.VCPRequest(
 					packet, 
 					static_cast<uint32_t>(vc), // GVCID mapped to VCID for simple test
@@ -406,9 +418,12 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
                       << " | Size: " << payloadSize << " B\n";
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
-            std::this_thread::sleep_for(std::chrono::milliseconds(10 + (vc * 5)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5 * 30)));
         }
     }
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	uslpStack.terminateThreads();
 
     std::cout << "\n[TEST PHASE 1 COMPLETE] Injected " << injectionLog.size() << " packets.\n\n";
 
@@ -420,7 +435,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     // Example synchronous tick:
     // uslpStack.TickMultiplexer(); 
     // Or allow background thread to process:
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // --- PHASE 3: VERIFY GENERATED TRANSFER FRAMES ---
     std::cout << "\n==================================================\n";
@@ -443,8 +458,8 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
                   << " | VC Frame Count: " << frameCount
                   << " | FHP: " << fhp
                   << " | Serialized Bytes: " << output.serializedBytes.length << " B"
-                  << " | First Hex Byte: 0x" << std::hex << (int)output.serializedBytes.data[0] << std::dec
-                  << "\n";
+                  << " | First Byte: 0d" << (int)output.tf.TFDF.TFDZ.data[8] << std::dec
+                  << "\n" << "\n";
     }
 
     // --- PHASE 4: TIMELINE CORRELATION REPORT ---
@@ -459,7 +474,6 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     std::cout << "[TEST PASSED] Pipeline execution verified successfully.\n";
     std::cout << "==================================================\n";
 }
-
 
 int main(int argc, char* argv[]) {
 	std::cout << "started running\n";
