@@ -34,8 +34,8 @@ constexpr uint16_t DEFAULT_FHP =				2047;			// Default First Header Pointer
 #define ZERO								0
 #define MAX_SECURITY_HEADER_LENGTH 			20
 #define MAX_SECURITY_TRAILER_LENGTH 		20
-constexpr uint16_t MAX_DATA_FIELD_LENGTH = 1014; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-constexpr uint16_t MAX_DATA_ZONE_LENGTH = 1014; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+constexpr uint16_t MAX_DATA_FIELD_LENGTH = 1012; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+constexpr uint16_t MAX_DATA_ZONE_LENGTH = 1009; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
 #define MAX_INSERT_ZONE_LENGTH				1024 // Apparently specified to worst case take maximum TF size
 #define OCF_DATA_LENGTH 					4
 #define CRC16_DATA_LENGTH 					2

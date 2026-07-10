@@ -213,15 +213,18 @@ void USLP::VCPacketThread() {
 			auto timeSinceFrame = std::chrono::steady_clock::now() - acc.m_lastFrameTime;
 			bool transferFrameDue = (timeSinceFrame > m_virtualChannels[vcidIndex].expirationTime) && 
 									(acc.m_accumulationBuffer.payloadBuffer.length > 0);
-			bool bufferReady = acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdfSize;
+			bool bufferReady = acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdzSize;
 
 			if (bufferReady || transferFrameDue) {
 				// We use a while loop to drain the buffer if multiple frames are ready
 				while (acc.m_accumulationBuffer.payloadBuffer.length > 0 || transferFrameDue) {
 					BitBuffer<MAX_ACCUMULATOR_LENGTH>& payloadBuffer = acc.m_accumulationBuffer.payloadBuffer;
 					
-					size_t numBytesToWrap = std::min(acc.m_fixedTfdfSize, payloadBuffer.length);
-					size_t paddingNeeded = acc.m_fixedTfdfSize - numBytesToWrap;
+					size_t numBytesToWrap = std::min(acc.m_fixedTfdzSize, payloadBuffer.length);
+					size_t paddingNeeded = acc.m_fixedTfdzSize - numBytesToWrap;
+					std::cout << "padding Needed: " << paddingNeeded << "\n";
+					std::cout << "fixedTfdzSize: " << acc.m_fixedTfdzSize << "\n";
+					std::cout << "payloadBuffer length: " << static_cast<int>(payloadBuffer.length) << "\n";
 
 					// 1. Calculate FHP and shift the metadata indices BEFORE erasing data
 					uint16_t fhp = DEFAULT_FHP; // Default: No new packet starts in this frame
@@ -255,12 +258,12 @@ void USLP::VCPacketThread() {
 					// (Note: if using a custom ring buffer, adjust your head/tail pointers instead of resize)
 
 					// 2. Construct the Transfer Frame Payload
-					BitBuffer<MAX_DATA_FIELD_LENGTH> tfdfPayload(&payloadBuffer.data[0], numBytesToWrap);
+					BitBuffer<MAX_DATA_ZONE_LENGTH> tfdfPayload(&payloadBuffer.data[0], numBytesToWrap);
 					if (paddingNeeded > 0) {
 						tfdfPayload.fill(tfdfPayload.length, 0x00, paddingNeeded);
 					}
 
-					//std::cout << "num bytes in payload: " << tfdfPayload.length << "\n";
+					std::cout << "last byte in payload: " << static_cast<uint32_t>(tfdfPayload.data[tfdfPayload.length - 1]) << "\n";
 
 					// 3. NOW it is safe to erase the bytes from the accumulator
 					payloadBuffer.eraseFromStart(numBytesToWrap);
@@ -277,7 +280,7 @@ void USLP::VCPacketThread() {
 					frameGeneratedThisTick = true;
 					
 					// Break the while loop if we don't have enough data for another full frame
-					if (payloadBuffer.length < acc.m_fixedTfdfSize) {
+					if (payloadBuffer.length < acc.m_fixedTfdzSize) {
 						break;
 					}
 				}
@@ -340,10 +343,13 @@ TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 	log("AllFramesGenerationFunction");
 	tf.FECF = GetFrameErrorControlField(tf);
+	std::cout << "all frames generation payload byte: " << static_cast<uint32_t>(tf.TFDF.TFDZ.data[tf.TFDF.TFDZ.length - 1]) << "\n";
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
 
 	m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};
 	m_finishedTransferFramesIdx++;
+
+	WriteBytes(serializedBytes);
 	if (tf.TFPH.VCID == 63) {
 		log("Finished Idle AllFramesGenerationFunction");
 	}
@@ -386,7 +392,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     // --- PHASE 1: PACKET INJECTION LOOP ---
     uint32_t sequenceId = 1000;
     
-    for (int cycle = 0; cycle < 5; ++cycle) {
+    for (int cycle = 0; cycle < 2; ++cycle) {
         for (uint8_t vc : targetVCs) {
             sequenceId++;
 
@@ -396,6 +402,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 			std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << "\n";
             
             BitBuffer<MAX_MESSAGE_LENGTH> packet = CreateDummyPacket(patternByte, payloadSize);
+			std::cout << "dummy packet last byte: " << static_cast<uint32_t>(packet.data[packet.length - 1]) << "\n";
 
             // Record exact timestamp right before injecting into the Service Access Point
             auto injectTime = std::chrono::steady_clock::now();
@@ -418,7 +425,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
                       << " | Size: " << payloadSize << " B\n";
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
-            std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5 * 30)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200 + (vc * 5 * 30)));
         }
     }
 
@@ -556,18 +563,19 @@ int main(int argc, char* argv[]) {
 			.deliverIncompletePackets = false
 		}
 	};
+
 	USLP uslp(managedParams);
 
 	RunVCPRequestMultiplexingTest(uslp);
-	/*
-	std::array<uint8_t, TEST_ARRAY_SIZE> message = GenerateRandomBytes();
-	WriteBytes(message); // Writes raw bytes of message to bytes.txt
+
+	//std::array<uint8_t, TEST_ARRAY_SIZE> message = GenerateRandomBytes();
+	//WriteBytes(message); // Writes raw bytes of message to bytes.txt
 	
 	//BitBuffer<PRIMARY_HEADER_LENGTH> packedHeader = packPrimaryHeader(tfph);
 	//std::bitset<8> b2{packedHeader.data[7]};
 	//std::cout << "First byte: " << b2 << std::endl;
 	//std::cout << "Packed Header: " << std::bitset<64>(packedHeader) << std::endl;
-
+	/*
 	enum MessageType type = BITMAP;
 	std::array<uint8_t, MAX_MESSAGE_LENGTH> messageContainer {};
 	std::memcpy(&messageContainer[0], &message[0], message.size());

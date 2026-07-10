@@ -59,27 +59,20 @@ std::array<uint8_t, TEST_ARRAY_SIZE> GenerateRandomBytes() {
 }
 
 // Writes Bytes to .txt assuming maximum transfer frame capacity
-void WriteBytes(std::array<uint8_t, TEST_ARRAY_SIZE> message) {
-	std::ofstream out("bytes.txt", std::ios::trunc);
+void WriteBytes(BitBuffer<MAX_TRANSFER_FRAME_LENGTH> &serializedBytes) {
+	std::ofstream out("bytes.txt", std::ios::app);
 	int lastTFIndex = 0;
+	out << "\n";
+	out << "\n";
+	out << "------ NEW TRANSFER FRAME ------";
+	out << "\n";
+	out << "\n";
 
-	for (int i = 0; i < TEST_ARRAY_SIZE; i++) {
-		//std::bitset<8> b2{message[i]};
-		//std::cout << b2 << std::endl;
-		if (i % 1003 == 0) {
-			lastTFIndex = i;
-
-			out << "\n";
-			out << "\n";
-			out << "------ NEW TRANSFER FRAME ------";
-			out << "\n";
-			out << "\n";
-		}
-
+	for (int i = 0; i < serializedBytes.length; i++) {
 		if ((i - lastTFIndex) % 32 == 0) {
 			out << "\n";
 		}
 
-		out << std::setw(3) << static_cast<int>(message[i]) << "  ";
+		out << std::setw(3) << static_cast<int>(serializedBytes.data[i]) << "  ";
 	}
 }

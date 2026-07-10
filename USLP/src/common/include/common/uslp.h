@@ -45,11 +45,11 @@ private:
 
 public:
     AccumulationBuffer m_accumulationBuffer;
-    size_t m_fixedTfdfSize; // e.g., 1024 bytes
+    size_t m_fixedTfdzSize; // e.g., 1024 bytes
     std::chrono::steady_clock::time_point m_lastFrameTime; // Last time a frame was transmitted
 
-    VirtualChannelAccumulator(size_t tfdfSize = MAX_DATA_FIELD_LENGTH) 
-        : m_fixedTfdfSize(tfdfSize) {
+    VirtualChannelAccumulator(size_t tfdzSize = MAX_DATA_ZONE_LENGTH) 
+        : m_fixedTfdzSize(tfdzSize) {
         m_lastPacketTime = std::chrono::steady_clock::now();
         m_lastFrameTime = std::chrono::steady_clock::now();
     }
@@ -67,8 +67,8 @@ public:
 class VirtualChannel {
 public:
     VirtualChannel(uint8_t vcFrameCountLength = VC_FRAME_COUNT_LENGTH, 
-        size_t fixedTfdfSize = MAX_DATA_FIELD_LENGTH)
-        : accumulator(fixedTfdfSize)
+        size_t fixedTfdzSize = MAX_DATA_ZONE_LENGTH)
+        : accumulator(fixedTfdzSize)
     {
         initializeMask(vcFrameCountLength);
     }
