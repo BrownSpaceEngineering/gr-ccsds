@@ -1,6 +1,7 @@
 #pragma once
 
-#include <stdint.h> 
+#include <stdint.h>
+#include <thread> 
 #include <iostream>
 #include <bitset>
 #include <vector>
@@ -22,8 +23,12 @@
 #include <cstdint>
 #include <chrono>
 #include <mutex>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-bool enableLogs = true;
+static constexpr bool enableLogs = false;
 
 template <typename... Args>
 void log(Args&&... args) {
@@ -36,16 +41,14 @@ void log(Args&&... args) {
 class VirtualChannelAccumulator {
 private:
     uint8_t m_vcid;
-    
     std::chrono::steady_clock::time_point m_lastPacketTime; // Last time a packet was accumulated
-
-    // Tracker for the next frame's First Header Pointer (FHP)
-    uint16_t m_nextFhp = 0; 
+    uint16_t m_nextFhp = 0; // Tracker for the next frame's First Header Pointer (FHP)
 
 public:
     AccumulationBuffer m_accumulationBuffer;
     size_t m_fixedTfdzSize; // e.g., 1024 bytes
     std::chrono::steady_clock::time_point m_lastFrameTime; // Last time a frame was transmitted
+    std::chrono::steady_clock::time_point m_accumulationStartTime; // USLP-143 State tracking
     std::mutex m_bufferMtx;
 
     VirtualChannelAccumulator(size_t tfdzSize = MAX_DATA_ZONE_LENGTH) 
@@ -96,21 +99,23 @@ public:
     }
 
     VirtualChannelAccumulator accumulator; // keeps track of current bytes to send in TFDF
-    std::chrono::milliseconds expirationTime{50}; // time between transfer frames
+
+    std::chrono::milliseconds expirationTime{50}; // USLP-143 (TFDFCompletionTimeoutMs)
+    std::chrono::milliseconds interFrameDelay{50}; // USLP-144 (interFrameDelayMs)
     
     uint64_t vcFrameCountMask = 0xFFFFFFFF;
     uint64_t vcFrameCount = 0;
 };
 
-static constexpr int maxFinishedTransferFrames = 1024;
+static constexpr int maxFinishedTransferFrames = 128;
 
 struct TFAllFormats {
     TransferFrame tf;
-    BitBuffer<maxFinishedTransferFrames> serializedBytes;
+    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes;
 };
 
 // Helper utility to convert the COP enum class into a string_view
-std::string_view ToString(USLPConfig::COPType type) {
+inline std::string_view ToString(USLPConfig::COPType type) {
     switch (type) {
         case USLPConfig::COPType::COP_1: return "COP_1";
         case USLPConfig::COPType::COP_P: return "COP_P";
@@ -140,7 +145,14 @@ public:
             uint8_t byteWidth = managedParams.virtualChannelConfigs[i].expeditedCountLength;
             
             m_virtualChannels[i].initializeMask(byteWidth);
-            m_virtualChannels[i].expirationTime = std::chrono::milliseconds(managedParams.virtualChannelConfigs[i].TFDFCompletionTimeoutMs);
+
+            // Map both temporal specifications to their corresponding channels
+            m_virtualChannels[i].expirationTime = std::chrono::milliseconds(
+                managedParams.virtualChannelConfigs[i].TFDFCompletionTimeoutMs
+            );
+            m_virtualChannels[i].interFrameDelay = std::chrono::milliseconds(
+                managedParams.virtualChannelConfigs[i].interFrameDelayMs
+            );
         }
 
         // 3. Setup the IDLE channel in the final slot
@@ -151,6 +163,7 @@ public:
         m_virtualChannels[idleIndex].expirationTime = std::chrono::milliseconds(50);
 
         PrintVCIDMapping();
+        InitNetworkSocket();
 
         // Spawning threads at the VERY END of constructor to ensure all members 
         // (packer, queues, virtualChannels) are fully initialized in memory first.
@@ -159,6 +172,7 @@ public:
     }
 
     ~USLP() {
+        CleanupNetworkSocket();
         terminateThreads();
     }
 
@@ -260,6 +274,13 @@ public:
         return m_finishedTransferFrames[i];
     };
 private:
+    void InitNetworkSocket();
+    void CleanupNetworkSocket();
+    void SendToGNURadio(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes);
+
+    int m_socketFd = -1;
+    sockaddr_in m_gnuRadioAddr{};
+
     std::array<int8_t, MAX_VC_COUNT> m_vcidToIndex{5};
     USLPPacker packer;
     USLPConfig managedParams;

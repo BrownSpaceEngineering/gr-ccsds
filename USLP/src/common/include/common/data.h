@@ -18,7 +18,7 @@
 constexpr uint16_t MAX_MESSAGE_LENGTH = 		UINT16_MAX; 	// Maximum size of a message a user can send (pre-serialization)
 constexpr uint8_t  VC_BITMASK = 				(1 << 6) - 1;
 constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; 	// Maximum size of the transfer frame creation queue
-constexpr uint16_t MAX_INCOMING_PACKETS =   	UINT16_MAX; 	// Max upper layer packets that can wait to be wrapped
+constexpr uint16_t MAX_INCOMING_PACKETS =   	128; 			// Max upper layer packets that can wait to be wrapped
 constexpr uint8_t  VC_COUNT = 					3; 				// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
 constexpr uint8_t  NUM_ACTIVE_CHANNELS = 		VC_COUNT + 1;	// VCs and the OID channel
 constexpr uint8_t  IDLE_VCID = 					63; 			// CCSDS standard

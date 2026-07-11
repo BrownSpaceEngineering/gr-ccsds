@@ -85,7 +85,7 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField& tfdf) {
     //std::cout << "pack header" << std::endl;
     BitBuffer<3> packedHeader = packDataFieldHeader(tfdf.header);
     size_t offset = 0;
-    std::cout << "packDataField last payload byte: " << static_cast<uint32_t>(tfdf.TFDZ.data[tfdf.TFDZ.length - 1]) << "\n";
+    //std::cout << "packDataField last payload byte: " << static_cast<uint32_t>(tfdf.TFDZ.data[tfdf.TFDZ.length - 1]) << "\n";
 
     append(tfdf.securityHeader, packed, offset);
     append(packedHeader, packed, offset);
@@ -94,7 +94,7 @@ BitBuffer<MAX_DATA_FIELD_LENGTH> USLPPacker::packDataField(TFDataField& tfdf) {
 
     packed.length = offset;
 
-    std::cout << "packed packDataField last payload byte: " << static_cast<uint32_t>(packed.data[packed.length - 1]) << "\n";
+    //std::cout << "packed packDataField last payload byte: " << static_cast<uint32_t>(packed.data[packed.length - 1]) << "\n";
 
     return packed;
 }
@@ -152,14 +152,13 @@ BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame
 	append(packedOperationalControlField, packed, offset);
 	append(packedFrameErrorControlField, packed, offset);
     if (tf.TFPH.VCID == 63) {
-		std::cout << "finished idle packing\n";
 	}
 
 	packed.length = offset;
 
-    std::cout << "Final packed bytes: " << packed.length << "\n";
+    //std::cout << "Final packed bytes: " << packed.length << "\n";
     for (int i = 0; i < 4; i++) {
-        std::cout << static_cast<int>(packed.data[packed.length - 1 - i]) << "\n";
+        //std::cout << static_cast<int>(packed.data[packed.length - 1 - i]) << "\n";
     }
 
 	return packed;
