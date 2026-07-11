@@ -173,9 +173,9 @@ void USLP::VCMultiplexer() {
 	while (m_running) {
 		TransferFrame frameToProcess;
         
-		log("popping");
+		//log("popping");
 		bool receivedRealFrame = m_frameMultiplexerQueue.pop_with_timeout(frameToProcess, TICK_RATE);
-        log("popped");
+        //log("popped");
 		// This will block safely without burning CPU cycles until
         // PrepareTransferFrame notifies the condition variable.
         if (receivedRealFrame) {
@@ -186,9 +186,9 @@ void USLP::VCMultiplexer() {
             BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
             idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
             
-			log("prepare idle frame");
+			//log("prepare idle frame");
 			//PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
-			log("finished idle frame");
+			//log("finished idle frame");
         }
 	}
 
@@ -198,7 +198,8 @@ void USLP::VCMultiplexer() {
 // Handles both wrapping packets in Transfer Frames and Multiplexing finished Transfer Frames
 void USLP::VCPacketThread() {
 	constexpr auto TICK_RATE = std::chrono::milliseconds(20);
-	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	//std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	log("Packet thread begin!");
 
 	while (m_running) {
 		auto nextTick = std::chrono::steady_clock::now() + TICK_RATE;
@@ -214,6 +215,9 @@ void USLP::VCPacketThread() {
 			bool transferFrameDue = (timeSinceFrame > m_virtualChannels[vcidIndex].expirationTime) && 
 									(acc.m_accumulationBuffer.payloadBuffer.length > 0);
 			bool bufferReady = acc.m_accumulationBuffer.payloadBuffer.length >= acc.m_fixedTfdzSize;
+
+			std::cout << "length accum buf: " << acc.m_accumulationBuffer.payloadBuffer.length << "\n";
+			std::cout << "transfer frame due? " << transferFrameDue << "\n";
 
 			if (bufferReady || transferFrameDue) {
 				// We use a while loop to drain the buffer if multiple frames are ready
@@ -391,8 +395,9 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 
     // --- PHASE 1: PACKET INJECTION LOOP ---
     uint32_t sequenceId = 1000;
+	//std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     
-    for (int cycle = 0; cycle < 2; ++cycle) {
+    for (int cycle = 1; cycle <= 5; ++cycle) {
         for (uint8_t vc : targetVCs) {
             sequenceId++;
 
@@ -425,7 +430,8 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
                       << " | Size: " << payloadSize << " B\n";
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
-            std::this_thread::sleep_for(std::chrono::milliseconds(200 + (vc * 5 * 30)));
+            //std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5 * 30)));
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 
@@ -484,6 +490,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 
 int main(int argc, char* argv[]) {
 	std::cout << "started running\n";
+	ClearFile();
 	// 2. Initialize your complete USLP Configuration
 	USLPConfig managedParams {
 		// Physical Channel Configuration

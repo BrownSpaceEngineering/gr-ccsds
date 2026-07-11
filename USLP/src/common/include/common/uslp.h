@@ -23,7 +23,7 @@
 #include <chrono>
 #include <mutex>
 
-bool enableLogs = false;
+bool enableLogs = true;
 
 template <typename... Args>
 void log(Args&&... args) {

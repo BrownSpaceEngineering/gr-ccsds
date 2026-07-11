@@ -74,3 +74,5 @@ public:
         return m_queue.empty();
     }
 };
+
+void ClearFile();

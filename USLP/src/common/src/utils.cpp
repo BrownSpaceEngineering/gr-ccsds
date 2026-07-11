@@ -58,6 +58,10 @@ std::array<uint8_t, TEST_ARRAY_SIZE> GenerateRandomBytes() {
 	return message;
 }
 
+void ClearFile() {
+	std::ofstream file("bytes.txt", std::ios::trunc);
+}
+
 // Writes Bytes to .txt assuming maximum transfer frame capacity
 void WriteBytes(BitBuffer<MAX_TRANSFER_FRAME_LENGTH> &serializedBytes) {
 	std::ofstream out("bytes.txt", std::ios::app);
