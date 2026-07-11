@@ -174,7 +174,9 @@ void USLP::VCMultiplexer() {
 		TransferFrame frameToProcess;
         
 		//log("popping");
+		std::unique_lock<std::mutex> lock(m_multiplexerMtx);
 		bool receivedRealFrame = m_frameMultiplexerQueue.pop_with_timeout(frameToProcess, TICK_RATE);
+		lock.unlock();
         //log("popped");
 		// This will block safely without burning CPU cycles until
         // PrepareTransferFrame notifies the condition variable.
@@ -187,7 +189,7 @@ void USLP::VCMultiplexer() {
             idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
             
 			//log("prepare idle frame");
-			//PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
 			//log("finished idle frame");
         }
 	}
@@ -211,6 +213,9 @@ void USLP::VCPacketThread() {
 		for (size_t vc = 0; vc < m_virtualChannels.size() - 1; vc++) {
 			int8_t vcidIndex = GetChannelByVCID(vc, m_vcidToIndex);
 			VirtualChannelAccumulator& acc = m_virtualChannels[vcidIndex].accumulator;
+
+			std::unique_lock<std::mutex> lock(acc.m_bufferMtx);
+
 			auto timeSinceFrame = std::chrono::steady_clock::now() - acc.m_lastFrameTime;
 			bool transferFrameDue = (timeSinceFrame > m_virtualChannels[vcidIndex].expirationTime) && 
 									(acc.m_accumulationBuffer.payloadBuffer.length > 0);
@@ -276,6 +281,8 @@ void USLP::VCPacketThread() {
 					acc.m_lastFrameTime = std::chrono::steady_clock::now();
 					transferFrameDue = false;
 
+					lock.unlock();
+
 					//std::cout << "fhp for normal frame: " << fhp << "\n";
 					std::cout << "vc in packet thread: " << vc << "\n";
 					std::cout << "payload byte: " << static_cast<uint32_t>(tfdfPayload.data[0]) << "\n";
@@ -311,6 +318,7 @@ void USLP::PrepareTransferFrame(
 
 	if (UPID == DEFAULT_UPID) {
 		//std::cout << "Pushing into multiplexer queue\n";
+		std::lock_guard<std::mutex> lock(m_multiplexerMtx);
 		m_frameMultiplexerQueue.push(std::move(tf));
 	} else if (UPID == IDLE_UPID) {
 		AllFramesGenerationFunction(tf);
@@ -397,7 +405,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     uint32_t sequenceId = 1000;
 	//std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     
-    for (int cycle = 1; cycle <= 5; ++cycle) {
+    for (int cycle = 1; cycle <= 15; ++cycle) {
         for (uint8_t vc : targetVCs) {
             sequenceId++;
 
@@ -430,12 +438,12 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
                       << " | Size: " << payloadSize << " B\n";
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
-            //std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5 * 30)));
+            //std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5)));
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	uslpStack.terminateThreads();
 
     std::cout << "\n[TEST PHASE 1 COMPLETE] Injected " << injectionLog.size() << " packets.\n\n";

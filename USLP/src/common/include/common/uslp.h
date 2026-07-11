@@ -38,7 +38,6 @@ private:
     uint8_t m_vcid;
     
     std::chrono::steady_clock::time_point m_lastPacketTime; // Last time a packet was accumulated
-    std::mutex m_bufferMtx;
 
     // Tracker for the next frame's First Header Pointer (FHP)
     uint16_t m_nextFhp = 0; 
@@ -47,6 +46,7 @@ public:
     AccumulationBuffer m_accumulationBuffer;
     size_t m_fixedTfdzSize; // e.g., 1024 bytes
     std::chrono::steady_clock::time_point m_lastFrameTime; // Last time a frame was transmitted
+    std::mutex m_bufferMtx;
 
     VirtualChannelAccumulator(size_t tfdzSize = MAX_DATA_ZONE_LENGTH) 
         : m_fixedTfdzSize(tfdzSize) {
@@ -269,6 +269,7 @@ private:
     uint64_t m_finishedTransferFramesIdx = 0;
 
     bool m_running = true;
+    std::mutex m_multiplexerMtx;
 
     // Thread handles
     std::thread m_packetThread;
