@@ -163,7 +163,9 @@ void USLP::VCPRequest(
 
 	if (vcidIndex >= 0) {
 		VirtualChannelAccumulator& accumulator = m_virtualChannels[vcidIndex].accumulator;
-		accumulator.processIncomingPacket(packet, GVCID);
+		if (!accumulator.processIncomingPacket(packet, GVCID)) {
+			std::cerr << "Request failed to process\n";
+		}
 	} else {
 		std::cerr << "Invalid GVCID provided\n";
 	}
@@ -231,36 +233,44 @@ void USLP::VCPacketThread() {
 					
 					size_t numBytesToWrap = std::min(acc.m_fixedTfdzSize, payloadBuffer.length);
 					size_t paddingNeeded = acc.m_fixedTfdzSize - numBytesToWrap;
+					std::cout << "numBytesToWrap: " << numBytesToWrap << "\n";
 
 					// 1. Calculate FHP and shift the metadata indices BEFORE erasing data
 					uint16_t fhp = DEFAULT_FHP; // Default: No new packet starts in this frame
-					size_t keptIndicesCount = 0;
 
 					PacketPtrBuffer& headerIndices = acc.m_accumulationBuffer.packetPointers;
-					size_t newTailPointer = headerIndices.m_queueTail;
+					size_t consumedCount = 0;
+					//size_t newTailPointer = headerIndices.m_queueTail;
 
-					for (size_t count = headerIndices.m_queueTail; count < headerIndices.m_queueSize; count++) {
+					for (size_t count = 0; count < headerIndices.m_queueSize; count++) {
 						size_t i = (headerIndices.m_queueTail + count);
-						if (i > MAX_INCOMING_PACKETS) i -= MAX_INCOMING_PACKETS;
+						if (i >= MAX_INCOMING_PACKETS) i -= MAX_INCOMING_PACKETS;
 
 						size_t startIndex = headerIndices.m_packetStartIndices[i];
+						std::cout << "start index: " << startIndex << "\n";
+						
 
 						if (startIndex < numBytesToWrap) {
 							// This packet starts inside our current frame window
-							if (fhp == 2047) {
+							if (fhp == DEFAULT_FHP) {
 								fhp = static_cast<uint16_t>(startIndex); // Grab the very first one
+								std::cout << "updating fhp: " << fhp << "\n";
 							}
 
-							newTailPointer++;
+							consumedCount++;
 							// We consume this index, so we do not copy it to the 'kept' count.
 						} else {
 							// This packet starts in a future frame. Shift its offset back
 							headerIndices.m_packetStartIndices[i] = startIndex - numBytesToWrap;
 						}
 					}
+
+					for (size_t k = 0; k < consumedCount; k++) {
+						headerIndices.pop();
+					}
 					
 					// Update the queue size to drop the consumed indices
-					headerIndices.m_queueTail = newTailPointer;
+					//headerIndices.m_queueTail = newTailPointer;
 					// (Note: if using a custom ring buffer, adjust your head/tail pointers instead of resize)
 
 					// 2. Construct the Transfer Frame Payload
@@ -327,10 +337,15 @@ TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, uint
 	TFDataField tfdf;
 	//tfdf.securityHeader = GetSecurityHeader();
 
-	tfdf.header.TFDZConstructionRules = DEFAULT_CONSTRUCTION_RULE;
+	if (UPID == IDLE_UPID) {
+		tfdf.header.TFDZConstructionRules = IDLE_CONSTRUCTION_RULE;
+	} else {
+		tfdf.header.TFDZConstructionRules = DEFAULT_CONSTRUCTION_RULE;
+	}
+	
 	tfdf.header.USLPProtocolIdentifier = UPID;
 	tfdf.header.firstHeaderLastValidOctetPointer = fhp;
-	std::cout << "fhp: " << fhp << std::endl;
+	std::cout << "fhp in VCPacketProcessing: " << fhp << "\n";
 	tfdf.TFDZ = data;
 	//tfdf.securityTrailer = GetSecurityTrailer();
 
@@ -351,7 +366,6 @@ TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 	log("AllFramesGenerationFunction");
 	tf.FECF = GetFrameErrorControlField(tf);
-	std::cout << "all frames generation payload byte: " << static_cast<uint32_t>(tf.TFDF.TFDZ.data[tf.TFDF.TFDZ.length - 1]) << "\n";
 	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
 
 	m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};

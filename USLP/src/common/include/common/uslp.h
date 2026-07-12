@@ -58,11 +58,11 @@ public:
     }
 
     // Handled by VCP.request
-    void processIncomingPacket(const BitBuffer<MAX_MESSAGE_LENGTH>& packetBytes, uint32_t GVCID) {
+    bool processIncomingPacket(const BitBuffer<MAX_MESSAGE_LENGTH>& packetBytes, uint32_t GVCID) {
         std::lock_guard<std::mutex> lock(m_bufferMtx);
         
         m_lastPacketTime = std::chrono::steady_clock::now();
-        m_accumulationBuffer.insert(&packetBytes.data[0], packetBytes.length);
+        return m_accumulationBuffer.insert(&packetBytes.data[0], packetBytes.length);
     }
 };
 

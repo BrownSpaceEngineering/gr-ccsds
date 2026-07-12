@@ -60,6 +60,7 @@ BitBuffer<MAX_INSERT_ZONE_LENGTH> USLPPacker::packInsertZone(TFInsertZone tfiz) 
 
 BitBuffer<DATA_FIELD_HEADER_LENGTH> USLPPacker::packDataFieldHeader(TFDFHeader tfdfh) {
     uint64_t packed = 0;
+    std::cout << "Packing the FHP: " << static_cast<uint32_t>(tfdfh.firstHeaderLastValidOctetPointer) << "\n";
 
     packed |= ((uint64_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
     packed |= ((uint64_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;
@@ -139,7 +140,6 @@ BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame
     //std::cout << "\n";
 	BitBuffer<MAX_INSERT_ZONE_LENGTH> packedInsertZone = packInsertZone(tf.TFIZ);
 	BitBuffer<MAX_DATA_FIELD_LENGTH> packedDataField = packDataField(tf.TFDF);
-    std::cout << "Data Field last byte: " << static_cast<uint32_t>(tf.TFDF.TFDZ.data[tf.TFDF.TFDZ.length - 1]) << "\n";
     //std::cout << tf.TFDF.TFDZ.length;
 	BitBuffer<OCF_DATA_LENGTH> packedOperationalControlField = packOperationalControlField(tf.OCF, tf.TFPH.VCID);
 	BitBuffer<FECF_DATA_LENGTH> packedFrameErrorControlField = packFrameErrorControlField(tf.FECF);

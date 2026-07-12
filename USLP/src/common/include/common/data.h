@@ -13,23 +13,6 @@
 #include <fstream>
 #include <iomanip>
 
-// Upper Level Macros
-#define MAX_TF_PER_MESSAGE						65 				// Most transfer frames we will ever use for one message
-constexpr uint16_t MAX_MESSAGE_LENGTH = 		UINT16_MAX; 	// Maximum size of a message a user can send (pre-serialization)
-constexpr uint8_t  VC_BITMASK = 				(1 << 6) - 1;
-constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; 	// Maximum size of the transfer frame creation queue
-constexpr uint16_t MAX_INCOMING_PACKETS =   	128; 			// Max upper layer packets that can wait to be wrapped
-constexpr uint8_t  VC_COUNT = 					3; 				// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
-constexpr uint8_t  NUM_ACTIVE_CHANNELS = 		VC_COUNT + 1;	// VCs and the OID channel
-constexpr uint8_t  IDLE_VCID = 					63; 			// CCSDS standard
-constexpr uint16_t MAX_VC_COUNT = 				64; 			// 6 bit field in transfer frame so 2^6
-constexpr uint8_t  DEFAULT_UPID = 				0b00000; 		// Indicates CFDP packets
-constexpr uint8_t  IDLE_UPID = 					0b11111; 		// Indicates Idle data
-constexpr uint8_t  IDLE_PATTERN = 				0x55;			// For OID frames
-constexpr uint8_t  DEFAULT_CONSTRUCTION_RULE = 	0; 				// For TFDF
-constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		1; 				// 1 byte of sequence number per frame
-constexpr uint16_t DEFAULT_FHP =				2047;			// Default First Header Pointer
-
 // Transfer Frame Data Lengths in bytes
 #define ZERO								0
 #define MAX_SECURITY_HEADER_LENGTH 			20
@@ -44,6 +27,24 @@ constexpr uint16_t MAX_DATA_ZONE_LENGTH =   1009; // MAX_TRANSFER_FRAME_LENGTH -
 #define MAX_TRANSFER_FRAME_LENGTH 			1024
 #define PRIMARY_HEADER_LENGTH				8
 #define DATA_FIELD_HEADER_LENGTH			3
+
+// Upper Level Macros
+#define MAX_TF_PER_MESSAGE						65 							// Most transfer frames we will ever use for one message
+constexpr uint16_t MAX_MESSAGE_LENGTH = 		UINT16_MAX; 				// Maximum size of a message a user can send (pre-serialization)
+constexpr uint8_t  VC_BITMASK = 				(1 << 6) - 1;				// For extracting the VC
+constexpr uint32_t MAX_ACCUMULATOR_LENGTH = 	UINT16_MAX; 				// Maximum size of the transfer frame creation queue
+constexpr uint16_t MAX_INCOMING_PACKETS =   	128; 						// Max upper layer packets that can wait to be wrapped
+constexpr uint8_t  VC_COUNT = 					3; 							// Total number of VCs (only considering uplink 1. bitmaps 2. commands)
+constexpr uint8_t  NUM_ACTIVE_CHANNELS = 		VC_COUNT + 1;				// VCs and the OID channel
+constexpr uint8_t  IDLE_VCID = 					63; 						// CCSDS standard
+constexpr uint16_t MAX_VC_COUNT = 				64; 						// 6 bit field in transfer frame so 2^6
+constexpr uint8_t  DEFAULT_UPID = 				0b00000; 					// Indicates CFDP packets
+constexpr uint8_t  IDLE_UPID = 					0b11111; 					// Indicates Idle data
+constexpr uint8_t  IDLE_PATTERN = 				0x55;						// For OID frames
+constexpr uint8_t  DEFAULT_CONSTRUCTION_RULE = 	0; 							// For TFDF and user-supplied packets
+constexpr uint8_t  IDLE_CONSTRUCTION_RULE = 	1; 							// For TFDF and idle data
+constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		1; 							// 1 byte of sequence number per frame
+constexpr uint16_t DEFAULT_FHP =				UINT16_MAX;	// Default First Header Pointer
 
 constexpr int MAX_DATA_SIZE = MAX_TRANSFER_FRAME_LENGTH * MAX_TF_PER_MESSAGE;
 
@@ -179,7 +180,8 @@ struct PacketPtrBuffer {
 	bool push(size_t index) {
 		if (m_queueSize >= MAX_INCOMING_PACKETS) return false;
 		m_packetStartIndices[m_queueHead] = index;
-		m_queueHead = (m_queueHead + 1) % MAX_INCOMING_PACKETS;
+		m_queueHead++;
+		if (m_queueHead >= MAX_INCOMING_PACKETS) m_queueHead -= MAX_INCOMING_PACKETS;
 		m_queueSize++;
 
 		return true;
@@ -188,7 +190,8 @@ struct PacketPtrBuffer {
 	void pop() {
 		if (m_queueSize > 0) {
 			m_queueSize -= 1;
-			m_queueTail = (m_queueTail + 1) % MAX_INCOMING_PACKETS;
+			m_queueTail++;
+			if (m_queueTail >= MAX_INCOMING_PACKETS) m_queueTail -= MAX_INCOMING_PACKETS;
 		}
 	}
 
