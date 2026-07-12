@@ -63,7 +63,7 @@ struct USLPConfig {
         uint8_t VCID;                              // USLP-129
 
         uint8_t seqControlCountLength;             // USLP-130 (<= 56 bits) (VC Count Length for Sequence Control QoS)
-        uint8_t expeditedCountLength = 4;          // USLP-131 (<= 56 bits) (VC Count Length for Expedited QoS)
+        uint8_t expeditedCountLength = 1;          // USLP-131 (<= 56 bits) (VC Count Length for Expedited QoS)
 
         COPType COPInEffect = COPType::NONE;       // USLP-132
         uint8_t CLCWVersion = 1;                   // USLP-133

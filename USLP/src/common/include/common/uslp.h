@@ -59,7 +59,6 @@ public:
 
     // Handled by VCP.request
     void processIncomingPacket(const BitBuffer<MAX_MESSAGE_LENGTH>& packetBytes, uint32_t GVCID) {
-        std::cout << "VCPRequest\n";
         std::lock_guard<std::mutex> lock(m_bufferMtx);
         
         m_lastPacketTime = std::chrono::steady_clock::now();

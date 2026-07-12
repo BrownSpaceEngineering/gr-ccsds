@@ -50,11 +50,11 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	TFPrimaryHeader tfph;
 	tfph.TFVN = managedParams.physical.TFVN; // Just carries the current version
 	tfph.SCID = managedParams.master.SCID; // Constant we decide on when the mission launches
-	tfph.sourceOrDestinationID = 1; // 0 is more important for multi-recipient systems
+	tfph.sourceOrDestinationID = 1; // CHANGE TO 0 ON THE FSW VERSION OF THIS CODE (Determines whether SCID refers to the frame source or destination)
 	tfph.VCID = VCID;
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
 	tfph.endTFPrimaryHeaderFlag = 0; // Decided possibly if we need super fast transfer of packet
-	tfph.TFLength = 0; // To be decided later (measured in octets)
+	tfph.TFLength = MAX_TRANSFER_FRAME_LENGTH - 1; // Could be variable, current model transmits fixed frames (in octets) (-1 since spec says one less than actual size)
 	tfph.bypassSequenceControlFlag = 1; // Expedited Frame, no COP
 	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
 	tfph.spare = 0b00; //Decide what to do with this later
@@ -153,7 +153,10 @@ void USLP::VCPRequest(
 		std::cerr << "Invalid PVN provided\n";
 		return;
 	}
-	//log("VCPRequest");
+
+	if (packet.length > MAX_MESSAGE_LENGTH) {
+		std::cerr << "Provided length longer than maximum allowed packet size\n";
+	}
 
 	uint8_t VCID = static_cast<uint8_t>(VC_BITMASK & GVCID);
 	int8_t vcidIndex = GetChannelByVCID(VCID, m_vcidToIndex);
@@ -275,9 +278,6 @@ void USLP::VCPacketThread() {
 
 					lock.unlock();
 
-					//std::cout << "fhp for normal frame: " << fhp << "\n";
-					std::cout << "vc in packet thread: " << vc << "\n";
-					std::cout << "payload byte: " << static_cast<uint32_t>(tfdfPayload.data[0]) << "\n";
 					PrepareTransferFrame(tfdfPayload, vc, fhp, DEFAULT_UPID);
 					m_virtualChannels[vcidIndex].incrementFrameCount();
 					frameGeneratedThisTick = true;
@@ -310,13 +310,15 @@ void USLP::PrepareTransferFrame(
 	TFDataField tfdf = VCPacketProcessing(data, VCID, fhp, UPID);
 	TransferFrame tf = VCGeneration(tfdf, VCID);
 
-	if (UPID == DEFAULT_UPID) {
+	if (tfdf.header.USLPProtocolIdentifier == DEFAULT_UPID) {
 		//std::cout << "Pushing into multiplexer queue\n";
 		std::lock_guard<std::mutex> lock(m_multiplexerMtx);
 		m_frameMultiplexerQueue.push(std::move(tf));
-	} else if (UPID == IDLE_UPID) {
+	} else if (tfdf.header.USLPProtocolIdentifier == IDLE_UPID) {
 		AllFramesGenerationFunction(tf);
 		//std::cout << "OID all frames generation hs been finshed\n";
+	} else {
+		std::cerr << "Unknown UPID, dropping frame\n";
 	}
 }
 
@@ -328,9 +330,9 @@ TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, uint
 	tfdf.header.TFDZConstructionRules = DEFAULT_CONSTRUCTION_RULE;
 	tfdf.header.USLPProtocolIdentifier = UPID;
 	tfdf.header.firstHeaderLastValidOctetPointer = fhp;
+	std::cout << "fhp: " << fhp << std::endl;
 	tfdf.TFDZ = data;
 	//tfdf.securityTrailer = GetSecurityTrailer();
-	//std::cout << "security trailer length on init: " << tfdf.securityTrailer.length << std::endl;
 
 	return tfdf;
 }

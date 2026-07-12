@@ -27,16 +27,16 @@ constexpr uint8_t  DEFAULT_UPID = 				0b00000; 		// Indicates CFDP packets
 constexpr uint8_t  IDLE_UPID = 					0b11111; 		// Indicates Idle data
 constexpr uint8_t  IDLE_PATTERN = 				0x55;			// For OID frames
 constexpr uint8_t  DEFAULT_CONSTRUCTION_RULE = 	0; 				// For TFDF
-constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		4; 				// 4 bytes of sequence number per frame
+constexpr uint8_t  VC_FRAME_COUNT_LENGTH = 		1; 				// 1 byte of sequence number per frame
 constexpr uint16_t DEFAULT_FHP =				2047;			// Default First Header Pointer
 
 // Transfer Frame Data Lengths in bytes
 #define ZERO								0
 #define MAX_SECURITY_HEADER_LENGTH 			20
 #define MAX_SECURITY_TRAILER_LENGTH 		20
-constexpr uint16_t MAX_DATA_FIELD_LENGTH = 1012; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-constexpr uint16_t MAX_DATA_ZONE_LENGTH = 1009; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-#define MAX_INSERT_ZONE_LENGTH				1024 // Apparently specified to worst case take maximum TF size
+constexpr uint16_t MAX_DATA_FIELD_LENGTH =  1012; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+constexpr uint16_t MAX_DATA_ZONE_LENGTH =   1009; // MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+#define MAX_INSERT_ZONE_LENGTH				1024  // Apparently specified to worst case take maximum TF size
 #define OCF_DATA_LENGTH 					4
 #define CRC16_DATA_LENGTH 					2
 #define CRC32_DATA_LENGTH 					4
