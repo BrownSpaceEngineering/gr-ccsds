@@ -276,7 +276,7 @@ void USLP::VCPacketThread() {
 					// 2. Construct the Transfer Frame Payload
 					BitBuffer<MAX_DATA_ZONE_LENGTH> tfdfPayload(&payloadBuffer.data[0], numBytesToWrap);
 					if (paddingNeeded > 0) {
-						tfdfPayload.fill(tfdfPayload.length, 0x00, paddingNeeded);
+						tfdfPayload.fill(tfdfPayload.length, CCSDS_EIP_HEADER, paddingNeeded);
 					}
 
 					// 3. NOW it is safe to erase the bytes from the accumulator

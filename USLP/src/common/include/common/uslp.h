@@ -106,7 +106,7 @@ public:
     uint64_t vcFrameCount = 0;
 };
 
-static constexpr int maxFinishedTransferFrames = 128;
+static constexpr int maxFinishedTransferFrames = 2048;
 
 struct TFAllFormats {
     TransferFrame tf;

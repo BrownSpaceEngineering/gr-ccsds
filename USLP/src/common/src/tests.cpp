@@ -49,12 +49,12 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     uint32_t sequenceId = 1000;
 	//std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     
-    for (int cycle = 1; cycle <= 15; ++cycle) {
+    for (int cycle = 1; cycle <= 30; ++cycle) {
         for (uint8_t vc : targetVCs) {
             sequenceId++;
 
             // Vary packet sizes: CFDP on VC 1 gets larger chunks
-            size_t payloadSize = (vc == 1) ? 512 : 800;
+            size_t payloadSize = (vc == 1) ? 512 : 256;
             uint8_t patternByte = static_cast<uint8_t>((vc << 4) | (cycle & 0x0F));
 			std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << "\n";
             
@@ -83,7 +83,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
             //std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5)));
-			std::this_thread::sleep_for(std::chrono::milliseconds(3));
+			std::this_thread::sleep_for(std::chrono::milliseconds(30));
         }
     }
 
