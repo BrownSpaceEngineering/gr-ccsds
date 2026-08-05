@@ -233,7 +233,7 @@ void USLP::VCPacketThread() {
 					
 					size_t numBytesToWrap = std::min(acc.m_fixedTfdzSize, payloadBuffer.length);
 					size_t paddingNeeded = acc.m_fixedTfdzSize - numBytesToWrap;
-					std::cout << "numBytesToWrap: " << numBytesToWrap << "\n";
+					//std::cout << "numBytesToWrap: " << numBytesToWrap << "\n";
 
 					// 1. Calculate FHP and shift the metadata indices BEFORE erasing data
 					uint16_t fhp = DEFAULT_FHP; // Default: No new packet starts in this frame
@@ -247,14 +247,14 @@ void USLP::VCPacketThread() {
 						if (i >= MAX_INCOMING_PACKETS) i -= MAX_INCOMING_PACKETS;
 
 						size_t startIndex = headerIndices.m_packetStartIndices[i];
-						std::cout << "start index: " << startIndex << "\n";
+						//std::cout << "start index: " << startIndex << "\n";
 						
 
 						if (startIndex < numBytesToWrap) {
 							// This packet starts inside our current frame window
 							if (fhp == DEFAULT_FHP) {
 								fhp = static_cast<uint16_t>(startIndex); // Grab the very first one
-								std::cout << "updating fhp: " << fhp << "\n";
+								//std::cout << "updating fhp: " << fhp << "\n";
 							}
 
 							consumedCount++;
@@ -345,7 +345,7 @@ TFDataField USLP::VCPacketProcessing(BitBuffer<MAX_DATA_ZONE_LENGTH>& data, uint
 	
 	tfdf.header.USLPProtocolIdentifier = UPID;
 	tfdf.header.firstHeaderLastValidOctetPointer = fhp;
-	std::cout << "fhp in VCPacketProcessing: " << fhp << "\n";
+	//std::cout << "fhp in VCPacketProcessing: " << fhp << "\n";
 	tfdf.TFDZ = data;
 	//tfdf.securityTrailer = GetSecurityTrailer();
 

@@ -60,7 +60,7 @@ BitBuffer<MAX_INSERT_ZONE_LENGTH> USLPPacker::packInsertZone(TFInsertZone tfiz) 
 
 BitBuffer<DATA_FIELD_HEADER_LENGTH> USLPPacker::packDataFieldHeader(TFDFHeader tfdfh) {
     uint64_t packed = 0;
-    std::cout << "Packing the FHP: " << static_cast<uint32_t>(tfdfh.firstHeaderLastValidOctetPointer) << "\n";
+    //std::cout << "Packing the FHP: " << static_cast<uint32_t>(tfdfh.firstHeaderLastValidOctetPointer) << "\n";
 
     packed |= ((uint64_t)(tfdfh.TFDZConstructionRules))             << TFDZ_CONSTRUCTION_RULES_POS;
     packed |= ((uint64_t)(tfdfh.USLPProtocolIdentifier))            << USLP_PROTOCOL_ID_POS;

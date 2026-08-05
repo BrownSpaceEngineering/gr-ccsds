@@ -213,7 +213,6 @@ public:
     };
 
 
-
     TFPrimaryHeader GetPrimaryHeader(uint8_t VCID);
     TFInsertZone GetInsertZone();
     BitBuffer<MAX_SECURITY_HEADER_LENGTH> GetSecurityHeader();
@@ -272,6 +271,8 @@ public:
         // 3. Safe, verified in-bounds read
         return m_finishedTransferFrames[i];
     };
+
+    void AllFramesReception(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes);
 private:
     void InitNetworkSocket();
     void CleanupNetworkSocket();
