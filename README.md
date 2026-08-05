@@ -22,7 +22,7 @@ and file uses within the directory.
 
 ### Directory Structure
 
-- `USLP/` - Unified Space Link Protocol, used as the data-layer protocol for PVDX with COP-1
+- `USLP/` - Unified Space Link Protocol, used as the data-layer protocol for PVDX
 - `cfdp/` - CCSDS File Delivery Protocol, transport protocol primarily for images sent by PVDX.
 - `spp/` - Space Packet Protocol, packetization protocol used by PVDX
 - `pvdx/` - Telemetry and data formats used by PVDX internally.
