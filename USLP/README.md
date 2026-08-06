@@ -4,7 +4,7 @@ This repository contains a C++20 implementation of the CCSDS Unified Space Data 
 
 The software is engineered under strict timing, memory, and hardware constraints, aiming for alignment with NASA launch-readiness and flight software integration requirements.
 
-The diagram below illustrates the structure of the Transfer Frame, which serves as the primary Protocol Data Unit (PDU) of the USLP link layer:
+The diagram below illustrates the structure of the Transfer Frame, which serves as USLP's primary Protocol Data Unit (PDU):
 
 <img width="996" height="268" alt="image" src="https://github.com/user-attachments/assets/47900fdf-1ebf-48c1-b781-a266ff679417" />
 
