@@ -113,3 +113,40 @@ uint32_t ComputeCRC(const uint8_t* data, size_t length, bool isCRC32) {
         return crc;
     }
 }
+
+void PrintPrimaryHeader(const TFPrimaryHeader& tfph) {
+    std::cout << "=============================================\n";
+    std::cout << "       USLP TRANSFER FRAME PRIMARY HEADER    \n";
+    std::cout << "=============================================\n";
+    
+    // Casting uint8_t and narrow integer fields ensures they print as numbers
+    std::cout << "  Transfer Frame Version (TFVN)     : " << static_cast<uint32_t>(tfph.TFVN) << "\n";
+    std::cout << "  Spacecraft Identifier (SCID)      : " << tfph.SCID << "\n";
+    
+    std::cout << "  Source/Destination ID (SDID)      : " 
+              << (tfph.sourceOrDestinationID ? "1 (Destination)" : "0 (Source)") << "\n";
+              
+    std::cout << "  Virtual Channel ID (VCID)         : " << static_cast<uint32_t>(tfph.VCID) << "\n";
+    std::cout << "  Multiplexer Access Point (MAPID)  : " << static_cast<uint32_t>(tfph.MAPID) << "\n";
+    
+    std::cout << "  End of Header Flag                : " 
+              << (tfph.endTFPrimaryHeaderFlag ? "1 (Present)" : "0 (Absent)") << "\n";
+              
+    std::cout << "  Transfer Frame Length             : " << tfph.TFLength << " bytes\n";
+    
+    std::cout << "  Bypass/Seq Control (QoS Type)     : " 
+              << (tfph.bypassSequenceControlFlag ? "1 (Expedited / Type-B)" : "0 (Sequence-Controlled / Type-A)") << "\n";
+              
+    std::cout << "  Protocol Command/Control Flag     : " 
+              << (tfph.protocolCommandControlFlag ? "1 (Protocol Control)" : "0 (User Data)") << "\n";
+              
+    // Standard bitset helps visualize spare bit fields
+    std::cout << "  Spare Bits                        : 0b" << std::bitset<2>(tfph.spare) << "\n";
+    
+    std::cout << "  Operational Control Field (OCF)   : " 
+              << (tfph.operationalControlFieldFlag ? "1 (Required/Present)" : "0 (Absent)") << "\n";
+              
+    std::cout << "  VC Frame Count Length             : " << static_cast<uint32_t>(tfph.VCFrameCountLength) << " bytes\n";
+    std::cout << "  VC Frame Count                    : " << tfph.VCFrameCount << "\n";
+    std::cout << "=============================================\n" << std::endl;
+}

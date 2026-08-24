@@ -168,6 +168,11 @@ public:
         // (packer, queues, virtualChannels) are fully initialized in memory first.
         m_packetThread = std::thread(&USLP::VCPacketThread, this);
         m_multiplexerThread = std::thread(&USLP::VCMultiplexer, this);
+        m_receptionThread = std::thread(&USLP::AllFramesReceptionThread, this);
+        m_packetsWriterThread = std::thread(&USLP::CompletedPacketsWriterThread, this);
+
+        std::ofstream outFile("TestOutput.txt", std::ios::trunc);
+        outFile = std::ofstream("PacketOutput.txt", std::ios::trunc);
     }
 
     ~USLP() {
@@ -189,6 +194,12 @@ public:
         }
         if (m_multiplexerThread.joinable()) {
             m_multiplexerThread.join();
+        }
+        if (m_receptionThread.joinable()) {
+            m_receptionThread.join();
+        }
+        if (m_packetsWriterThread.joinable()) {
+            m_packetsWriterThread.join();
         }
     };
     void PrintVCIDMapping();
@@ -260,6 +271,7 @@ public:
     void VCDemultiplexing(TransferFrame& tf);
     void VCReception(TransferFrame& tf, uint8_t VCID);
     void VCPacketExtraction(TFDataField& TFDF, uint8_t VCID);
+    void CompletedPacketsWriterThread();
 
     //int8_t GetChannelByVCID(uint8_t vcid); // Returns the channel index of the VCID, -1 if invalid
     uint64_t GetFinishedTransferFramesIndex() {
@@ -307,4 +319,5 @@ private:
     std::array<RxVirtualChannelState, NUM_ACTIVE_CHANNELS> m_rxVirtualChannels; // Receiving states tracked independently for each active VC
     uint64_t m_crcErrorCount = 0; // Global counter tracking frames discarded due to checksum failures
     std::thread m_receptionThread; // Thread handle managing the background AllFramesReception processing loop
+    std::thread m_packetsWriterThread; // Writes received packets out to disc
 };

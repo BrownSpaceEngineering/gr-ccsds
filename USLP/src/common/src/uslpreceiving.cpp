@@ -28,6 +28,7 @@ void USLP::AllFramesReceptionThread() {
         
         // Non-blocking pop with timeout to allow thread to exit smoothly on shutdown
         if (m_receptionQueue.pop(rawFrame)) {
+            cout << "found frame being received\n";
             // Pass the frame to the AllFramesReception decoder
             AllFramesReception(rawFrame, false);
         } else {
@@ -59,14 +60,9 @@ void USLP::AllFramesReception(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serial
         
         // Extract the transmitted CRC from the end of the frame
         uint32_t receivedCRC = 0;
-        if (managedParams.physical.isCRC32) {
-            receivedCRC = (static_cast<uint32_t>(serializedBytes.data[crcInputLength]) << 24)     |
-                          (static_cast<uint32_t>(serializedBytes.data[crcInputLength + 1]) << 16) |
-                          (static_cast<uint32_t>(serializedBytes.data[crcInputLength + 2]) << 8)  |
-                          (static_cast<uint32_t>(serializedBytes.data[crcInputLength + 3]));
-        } else {
-            receivedCRC = (static_cast<uint16_t>(serializedBytes.data[crcInputLength]) << 8) |
-                          (static_cast<uint16_t>(serializedBytes.data[crcInputLength + 1]));
+
+        for (size_t i = 0; i < fecfSize; ++i) {
+            receivedCRC = (receivedCRC << 8) | static_cast<uint32_t>(serializedBytes.data[crcInputLength + i]);
         }
 
         // If it does not match, throw out the frame, increment a "CRC error" counter, and log it
@@ -75,6 +71,8 @@ void USLP::AllFramesReception(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serial
             std::cerr << "[ERROR] USLP: CRC Mismatch (Computed: 0x" << std::hex << computedCRC 
                       << ", Received: 0x" << receivedCRC << std::dec << "). Frame discarded.\n";
             return;
+        } else {
+            cout << "CRC PASSES!\n";
         }
     }
 
@@ -86,7 +84,19 @@ void USLP::AllFramesReception(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serial
     */
 
     // Convert serialized bytes into Transfer Frame object with accessible fields
+    cout << endl;
+    cout << "---- PRINTING FIRST BYTES OF TRANSFER FRAME ----" << endl;
+
+    for (int i = 0; i < 8; i++) {
+        cout << static_cast<int>(serializedBytes.data[i]) << " ";
+    }
+
+    cout << endl;
+    cout << endl;
+
     TransferFrame tf = packer.unpackTransferFrame(serializedBytes);
+    cout << "---- RECEIVE SIDE ----" << endl;
+    PrintPrimaryHeader(tf.TFPH);
 
     // Send transfer frame to Virtual Channel Demultiplexing
     VCDemultiplexing(tf);

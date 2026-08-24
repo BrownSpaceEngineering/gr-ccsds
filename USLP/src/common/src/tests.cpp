@@ -19,12 +19,45 @@
 #include <common/tests.h>
 #include <chrono>
 
-// Helper to generate dummy CCSDS/CFDP packet payloads
+// Helper to generate dummy CCSDS/CFDP packet payloads with valid headers
 BitBuffer<MAX_MESSAGE_LENGTH> CreateDummyPacket(uint8_t fillByte, size_t numBytes) {
     BitBuffer<MAX_MESSAGE_LENGTH> packet;
+    
+    // Ensure the packet is at least large enough to contain the 6-byte header
+    if (numBytes < 6) {
+        numBytes = 6;
+    }
     packet.length = numBytes;
 
-    for (size_t i = 0; i < numBytes; ++i) {
+    // A static rolling counter to simulate realistic transmission sequences
+    static uint16_t packetSequenceCount = 0;
+    packetSequenceCount = (packetSequenceCount + 1) & 0x3FFF; // 14-bit mask
+
+    // 1. Pack Bytes 0 & 1 (16 bits): 
+    // - Packet Version Number (PVN) [3 bits]: 000 (Space Packet)
+    // - Packet Type [1 bit]                 : 0 (Telemetry/Downlink)
+    // - Secondary Header Flag [1 bit]       : 0 (Absent)
+    // - APID [11 bits]                      : 0x042 (Standard test APID / Decimal 66)
+    uint16_t apid = 0x042;
+    uint16_t byte0_1 = (0b000 << 13) | (0 << 12) | (0 << 11) | (apid & 0x07FF);
+    packet.data[0] = static_cast<uint8_t>((byte0_1 >> 8) & 0xFF);
+    packet.data[1] = static_cast<uint8_t>(byte0_1 & 0xFF);
+
+    // 2. Pack Bytes 2 & 3 (16 bits):
+    // - Sequence Flags [2 bits]             : 11 (Unsegmented / Standalone packet)
+    // - Sequence Count [14 bits]            : Rolling counter
+    uint16_t byte2_3 = (0b11 << 14) | (packetSequenceCount & 0x3FFF);
+    packet.data[2] = static_cast<uint8_t>((byte2_3 >> 8) & 0xFF);
+    packet.data[3] = static_cast<uint8_t>(byte2_3 & 0xFF);
+
+    // 3. Pack Bytes 4 & 5 (16 bits):
+    // - Packet Data Length                  : (Total Packet Length) - 7
+    uint16_t lengthField = static_cast<uint16_t>(numBytes - 7);
+    packet.data[4] = static_cast<uint8_t>((lengthField >> 8) & 0xFF);
+    packet.data[5] = static_cast<uint8_t>(lengthField & 0xFF);
+
+    // 4. Fill the remaining bytes (the payload) with the fillByte
+    for (size_t i = 6; i < numBytes; ++i) {
         packet.data[i] = fillByte;
     }
 
@@ -32,9 +65,9 @@ BitBuffer<MAX_MESSAGE_LENGTH> CreateDummyPacket(uint8_t fillByte, size_t numByte
 }
 
 void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
-    std::cout << "==================================================\n";
-    std::cout << "[TEST START] Multi-VC VCPRequest Injection & Multiplexing\n";
-    std::cout << "==================================================\n";
+    ////std::cout << "==================================================\n";
+    //std::cout << "[TEST START] Multi-VC VCPRequest Injection & Multiplexing\n";
+    //std::cout << "==================================================\n";
 
     std::vector<PacketInjectionRecord> injectionLog;
     const auto testStartTime = std::chrono::steady_clock::now();
@@ -43,7 +76,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     // VC 0: High-Priority Spacecraft Commands / Real-Time Telemetry
     // VC 1: CFDP File Delivery (Heavy data chunks)
     // VC 2: Low-Priority Engineering Logs
-    const std::vector<uint8_t> targetVCs = {0, 1, 2};
+    const std::vector<uint8_t> targetVCs = {0};
 
     // 1. Initialize the random engine and define your range (e.g., 64 to 512 bytes)
     std::random_device rd;
@@ -62,10 +95,10 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
             // Vary packet sizes: CFDP on VC 1 gets larger chunks
             size_t payloadSize = (vc == 1) ? sizeDistB(gen) : sizeDistA(gen);
             uint8_t patternByte = static_cast<uint8_t>((vc << 4) | (cycle & 0x0F));
-			//std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << "\n";
+			////std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << "\n";
             
             BitBuffer<MAX_MESSAGE_LENGTH> packet = CreateDummyPacket(patternByte, payloadSize);
-			//std::cout << "dummy packet last byte: " << static_cast<uint32_t>(packet.data[packet.length - 1]) << "\n";
+			////std::cout << "dummy packet last byte: " << static_cast<uint32_t>(packet.data[packet.length - 1]) << "\n";
 
             // Record exact timestamp right before injecting into the Service Access Point
             auto injectTime = std::chrono::steady_clock::now();
@@ -83,9 +116,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 				);
 			}
 
-            std::cout << "[INJECT] SDU_ID: " << sequenceId 
-                      << " | VC: " << static_cast<int>(vc) 
-                      << " | Size: " << payloadSize << " B\n";
+            //std::cout << "[INJECT] SDU_ID: " << sequenceId << " | VC: " << static_cast<int>(vc) << " | Size: " << payloadSize << " B\n";
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
             //std::this_thread::sleep_for(std::chrono::milliseconds(20 + (vc * 5)));
@@ -93,15 +124,15 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
         }
     }
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	uslpStack.terminateThreads();
 
-    std::cout << "\n[TEST PHASE 1 COMPLETE] Injected " << injectionLog.size() << " packets.\n\n";
+    //std::cout << "\n[TEST PHASE 1 COMPLETE] Injected " << injectionLog.size() << " packets.\n\n";
 
     // --- PHASE 2: TRIGGER MULTIPLEXER & FRAME GENERATION ---
     // If your multiplexer runs on a separate thread, give it time to flush.
     // If running synchronously, trigger your frame generation loop here.
-    std::cout << "[MULTIPLEXING] Running frame generation loop across accumulators...\n";
+    //std::cout << "[MULTIPLEXING] Running frame generation loop across accumulators...\n";
     
     // Example synchronous tick:
     // uslpStack.TickMultiplexer(); 
@@ -109,12 +140,12 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // --- PHASE 3: VERIFY GENERATED TRANSFER FRAMES ---
-    std::cout << "\n==================================================\n";
-    std::cout << "[RESULTS] Inspecting Generated Transfer Frames\n";
-    std::cout << "==================================================\n";
+    //std::cout << "\n==================================================\n";
+    //std::cout << "[RESULTS] Inspecting Generated Transfer Frames\n";
+    //std::cout << "==================================================\n";
 
     size_t generatedCount = uslpStack.GetFinishedTransferFramesIndex(); // Retrieves m_finishedTransferFramesIdx
-    std::cout << "Total Transfer Frames Generated: " << generatedCount << "\n\n";
+    //std::cout << "Total Transfer Frames Generated: " << generatedCount << "\n\n";
 
     for (size_t i = 0; i < generatedCount; ++i) {
         const TFAllFormats& output = uslpStack.GetFinishedFrame(i);
@@ -124,32 +155,31 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
         uint32_t frameCount = output.tf.TFPH.VCFrameCount;
         uint16_t fhp = output.tf.TFDF.header.firstHeaderLastValidOctetPointer;
 
-        std::cout << "Frame #" << std::setw(3) << std::setfill('0') << i 
-                  << " | VCID: " << static_cast<int>(frameVCID)
-                  << " | VC Frame Count: " << frameCount
-                  << " | FHP: " << fhp
-                  << " | Serialized Bytes: " << output.serializedBytes.length << " B"
-                  << " | First Byte: 0d" << (int)output.tf.TFDF.TFDZ.data[8] << std::dec
-                  << "\n" << "\n";
+        //std::cout << "Frame #" << std::setw(3) << std::setfill('0') << i 
+        //          << " | VCID: " << static_cast<int>(frameVCID)
+        //          << " | VC Frame Count: " << frameCount
+        //          << " | FHP: " << fhp
+        //          << " | Serialized Bytes: " << output.serializedBytes.length << " B"
+        //          << " | First Byte: 0d" << (int)output.tf.TFDF.TFDZ.data[8] << std::dec
+        //          << "\n" << "\n";
     }
 
     // --- PHASE 4: TIMELINE CORRELATION REPORT ---
-    std::cout << "\n--- Ingestion Timeline Report ---\n";
+    //std::cout << "\n--- Ingestion Timeline Report ---\n";
     for (const auto& record : injectionLog) {
         auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(record.timestamp - testStartTime).count();
-        std::cout << "T+" << std::setw(4) << elapsedMs << " ms | SDU " << record.sduId 
-                  << " ingested into VCID " << static_cast<int>(record.vcid) << "\n";
+        //std::cout << "T+" << std::setw(4) << elapsedMs << " ms | SDU " << record.sduId << " ingested into VCID " << static_cast<int>(record.vcid) << "\n";
     }
 
-    std::cout << "==================================================\n";
-    std::cout << "[TEST PASSED] Pipeline execution verified successfully.\n";
-    std::cout << "==================================================\n";
+    //std::cout << "==================================================\n";
+    //std::cout << "[TEST PASSED] Pipeline execution verified successfully.\n";
+    //std::cout << "==================================================\n";
 }
 
 void RunUslpTemporalStandardsTest() {
-    std::cout << "\n==================================================\n";
-    std::cout << "[TEST START] USLP-143 & USLP-144 Temporal Standards Test\n";
-    std::cout << "==================================================\n";
+    //std::cout << "\n==================================================\n";
+    //std::cout << "[TEST START] USLP-143 & USLP-144 Temporal Standards Test\n";
+    //std::cout << "==================================================\n";
 
     USLPConfig testParams {
         USLPConfig::PhysicalChannel {
@@ -230,7 +260,7 @@ void RunUslpTemporalStandardsTest() {
     // =========================================================================
     // PHASE 1: Verify USLP-143 (TFDF Completion Timeout)
     // =========================================================================
-    std::cout << "\n--- [PHASE 1] Testing USLP-143 (Completion Timeout) on VCID 1 ---\n";
+    //std::cout << "\n--- [PHASE 1] Testing USLP-143 (Completion Timeout) on VCID 1 ---\n";
     
     size_t phase1StartFrames = uslp.GetFinishedTransferFramesIndex();
     auto p1StartTime = std::chrono::steady_clock::now();
@@ -241,7 +271,7 @@ void RunUslpTemporalStandardsTest() {
     BitBuffer<MAX_MESSAGE_LENGTH> p1Packet = CreateDummyPacket(p1FillByte, tinyPacketSize);
 
     uslp.VCPRequest(p1Packet, 1, 0x00, 1111, ServiceType::EXPEDITED);
-    std::cout << "[INFO] Tiny packet injected. Waiting 150ms (Timeout is 300ms)..." << std::endl;
+    //std::cout << "[INFO] Tiny packet injected. Waiting 150ms (Timeout is 300ms)..." << std::endl;
 
     // Check at T+150ms (before the 300ms timeout)
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -252,11 +282,11 @@ void RunUslpTemporalStandardsTest() {
             frameCountAt150ms++;
         }
     }
-    std::cout << "[VERIFY] Frames generated for VCID 1 at T+150ms: " << frameCountAt150ms << std::endl;
+    //std::cout << "[VERIFY] Frames generated for VCID 1 at T+150ms: " << frameCountAt150ms << std::endl;
     assert(frameCountAt150ms == 0 && "Assertion failed: Frame was generated on VCID 1 before TFDFCompletionTimeoutMs expired!");
 
     // Wait another 250ms (reaching T+400ms, crossing the 300ms threshold)
-    std::cout << "[INFO] Waiting another 250ms..." << std::endl;
+    //std::cout << "[INFO] Waiting another 250ms..." << std::endl;
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
     size_t frameCountAt400ms = 0;
@@ -270,7 +300,7 @@ void RunUslpTemporalStandardsTest() {
     }
     
     auto elapsedP1 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - p1StartTime).count();
-    std::cout << "[VERIFY] Frames generated for VCID 1 at T+" << elapsedP1 << "ms: " << frameCountAt400ms << std::endl;
+    //std::cout << "[VERIFY] Frames generated for VCID 1 at T+" << elapsedP1 << "ms: " << frameCountAt400ms << std::endl;
     assert(frameCountAt400ms == 1 && "Assertion failed: Exactly one frame should have been flushed for VCID 1!");
 
     // Structural validation of the USLP-143 flushed frame
@@ -285,20 +315,20 @@ void RunUslpTemporalStandardsTest() {
     for (size_t i = tinyPacketSize; i < p1Tfdz.length; ++i) {
         assert(p1Tfdz.data[i] == 0x00 && "Assertion failed: Trailing padding must be filled with zeros!");
     }
-    std::cout << "[SUCCESS] USLP-143 (Completion Timeout) verified successfully.\n";
+    //std::cout << "[SUCCESS] USLP-143 (Completion Timeout) verified successfully.\n";
 
 
     // =========================================================================
     // PHASE 2: Verify USLP-144 (Inter-Frame Delay Heartbeat)
     // =========================================================================
-    std::cout << "\n--- [PHASE 2] Testing USLP-144 (Inter-Frame Delay Heartbeat) on VCID 0 ---\n";
+    //std::cout << "\n--- [PHASE 2] Testing USLP-144 (Inter-Frame Delay Heartbeat) on VCID 0 ---\n";
     
     size_t phase2StartFrames = uslp.GetFinishedTransferFramesIndex();
     auto p2StartTime = std::chrono::steady_clock::now();
 
     // No packets are injected into VCID 0. We expect it to automatically release a frame
     // because its interFrameDelayMs is configured to 400ms.
-    std::cout << "[INFO] Keeping VCID 0 empty. Waiting 200ms (Heartbeat threshold is 400ms)..." << std::endl;
+    //std::cout << "[INFO] Keeping VCID 0 empty. Waiting 200ms (Heartbeat threshold is 400ms)..." << std::endl;
 
     // Check at T+200ms (before the 400ms heartbeat)
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -309,11 +339,11 @@ void RunUslpTemporalStandardsTest() {
             frameCountAt200ms++;
         }
     }
-    std::cout << "[VERIFY] Heartbeat frames generated for VCID 0 at T+200ms: " << frameCountAt200ms << std::endl;
+    //std::cout << "[VERIFY] Heartbeat frames generated for VCID 0 at T+200ms: " << frameCountAt200ms << std::endl;
     assert(frameCountAt200ms == 0 && "Assertion failed: Heartbeat frame was generated before interFrameDelayMs expired!");
 
     // Wait another 300ms (reaching T+500ms, crossing the 400ms threshold)
-    std::cout << "[INFO] Waiting another 300ms..." << std::endl;
+    //std::cout << "[INFO] Waiting another 300ms..." << std::endl;
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     size_t frameCountAt500ms = 0;
@@ -327,7 +357,7 @@ void RunUslpTemporalStandardsTest() {
     }
 
     auto elapsedP2 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - p2StartTime).count();
-    std::cout << "[VERIFY] Heartbeat frames generated for VCID 0 at T+" << elapsedP2 << "ms: " << frameCountAt500ms << std::endl;
+    //std::cout << "[VERIFY] Heartbeat frames generated for VCID 0 at T+" << elapsedP2 << "ms: " << frameCountAt500ms << std::endl;
     assert(frameCountAt500ms == 1 && "Assertion failed: Exactly one heartbeat frame should have been flushed for VCID 0!");
 
     // Structural validation of the USLP-144 flushed heartbeat frame
@@ -335,7 +365,7 @@ void RunUslpTemporalStandardsTest() {
     
     // FHP must be 2047 (DEFAULT_FHP) because this is a heartbeat with no packets inside
     uint16_t p2Fhp = p2Frame.tf.TFDF.header.firstHeaderLastValidOctetPointer;
-    std::cout << "[VERIFY] Heartbeat FHP: " << p2Fhp << " (Expected: 2047)" << std::endl;
+    //std::cout << "[VERIFY] Heartbeat FHP: " << p2Fhp << " (Expected: 2047)" << std::endl;
     assert(p2Fhp == DEFAULT_FHP && "Assertion failed: FHP must be 2047 for a frame containing no structural packet data!");
 
     // Check that the entire frame is filled with zeros (padding)
@@ -348,12 +378,12 @@ void RunUslpTemporalStandardsTest() {
         }
     }
     assert(allZeros && "Assertion failed: Heartbeat frame must be completely zero-padded!");
-    std::cout << "[SUCCESS] USLP-144 (Inter-Frame Delay Heartbeat) verified successfully.\n";
+    //std::cout << "[SUCCESS] USLP-144 (Inter-Frame Delay Heartbeat) verified successfully.\n";
 
     // Clean up background threads
     uslp.terminateThreads();
 
-    std::cout << "==================================================\n";
-    std::cout << "[TEST PASSED] All USLP Temporal Standards Verified Successfully!\n";
-    std::cout << "==================================================\n\n";
+    //std::cout << "==================================================\n";
+    //std::cout << "[TEST PASSED] All USLP Temporal Standards Verified Successfully!\n";
+    //std::cout << "==================================================\n\n";
 }

@@ -15,6 +15,8 @@
 #include <mutex>
 #include <queue>
 #include <condition_variable>
+using std::cout;
+using std::endl;
 
 constexpr int TEST_ARRAY_SIZE = 3009;
 
@@ -77,3 +79,4 @@ public:
 
 void ClearFile();
 uint32_t ComputeCRC(const uint8_t* data, size_t length, bool isCRC32);
+void PrintPrimaryHeader(const TFPrimaryHeader& tfph);

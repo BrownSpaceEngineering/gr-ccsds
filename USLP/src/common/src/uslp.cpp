@@ -71,9 +71,13 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 		tfph.VCFrameCount = m_virtualChannels[vcidIndex].vcFrameCount;
 		log("vc frame count length: ", tfph.VCFrameCountLength);
 		log("vc frame count: ", tfph.VCFrameCount);
+		std::cout << std::endl;
+		std::cout << "vcid: " << static_cast<int>(VCID) << std::endl;
+		std::cout << "vc frame count: " << tfph.VCFrameCount << std::endl;
 	}
 
 	log("GetPrimaryHeader2");
+	PrintPrimaryHeader(tfph);
 
 	return tfph;
 }
@@ -126,16 +130,22 @@ OperationalControlField USLP::GetOperationalControlField(USLPContext context) {
 }
 
 FrameErrorControlField USLP::GetFrameErrorControlField(TransferFrame& tf) {
-	FrameErrorControlField fecf {};
+    FrameErrorControlField fecf {};
 
-	if (managedParams.physical.FECFPresent) {
-		BitBuffer<FECF_DATA_LENGTH> FECFData;
-		FECFData.data = CRCGenerator();
-		FECFData.length = FECF_DATA_LENGTH;
-		fecf.FECFData = FECFData;
-	}
+    if (managedParams.physical.FECFPresent) {
+        // Initialize a placeholder FECF with the correct length.
+        // The actual CRC calculation is deferred to AllFramesGenerationFunction 
+        // after the entire frame has been serialized into a byte stream.
+        size_t fecfSize = managedParams.physical.isCRC32 ? 4 : 2;
+        fecf.FECFData.length = fecfSize;
+        
+        // Fill with dummy zeros for now
+        for (size_t i = 0; i < fecfSize; ++i) {
+            fecf.FECFData.data[i] = 0x00;
+        }
+    }
 
-	return fecf;
+    return fecf;
 }
 
 // TO-DO: Checks with SANA registry
@@ -192,9 +202,11 @@ void USLP::VCMultiplexer() {
             // CASE B: 20ms passed with absolutely zero activity. Generate OID.
             BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
             idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
+			int8_t vcidIndex = GetChannelByVCID(IDLE_VCID, m_vcidToIndex);
+			m_virtualChannels[vcidIndex].incrementFrameCount();
             
 			//log("prepare idle frame");
-			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+			//PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
 			//log("finished idle frame");
         }
 	}
@@ -364,18 +376,113 @@ TransferFrame USLP::VCGeneration(TFDataField& tfdf, uint8_t VCID) {
 
 // Interfaces with GNU Radio module, unsure how to have it return to that yet
 void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
-	log("AllFramesGenerationFunction");
-	tf.FECF = GetFrameErrorControlField(tf);
-	BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
+    log("AllFramesGenerationFunction");
 
-	m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};
-	m_finishedTransferFramesIdx++;
+    // 1. Initialize the placeholder FECF so the packer knows to reserve space at the end of the frame
+    tf.FECF = GetFrameErrorControlField(tf);
 
-	WriteBytes(serializedBytes);
-	SendToGNURadio(serializedBytes);
-	if (tf.TFPH.VCID == 63) {
-		log("Finished Idle AllFramesGenerationFunction");
-	}
+    // 2. Pack the Transfer Frame first.
+    // If managedParams.physical.FECFPresent is true, packer.packTransferFrame(tf) 
+    // will reserve the final 2 or 4 bytes at the end of serializedBytes 
+    // (filled with the dummy 0x00 placeholders from GetFrameErrorControlField).
+    BitBuffer<MAX_TRANSFER_FRAME_LENGTH> serializedBytes = packer.packTransferFrame(tf);
+
+    // 3. If FECF is present, calculate the CRC over the serialized byte stream
+    if (managedParams.physical.FECFPresent) {
+        size_t fecfSize = managedParams.physical.isCRC32 ? 4 : 2;
+        
+        if (serializedBytes.length <= fecfSize) {
+            std::cerr << "[ERROR] USLP: Serialized frame is too short to compute FECF.\n";
+            return;
+        }
+
+        // The CRC must be calculated over all bytes EXCLUDING the FECF itself
+        size_t crcInputLength = serializedBytes.length - fecfSize;
+        uint32_t computedCRC = ComputeCRC(serializedBytes.data.data(), crcInputLength, managedParams.physical.isCRC32);
+
+        // 4. Dynamically pack the CRC in a loop (handles both CRC-16 and CRC-32)
+        for (size_t i = 0; i < fecfSize; ++i) {
+            // Calculate shift dynamically:
+            // For 4 bytes (CRC-32), shifts are 24, 16, 8, 0.
+            // For 2 bytes (CRC-16), shifts are 8, 0.
+            size_t shift = (fecfSize - 1 - i) * 8;
+            uint8_t byteVal = static_cast<uint8_t>((computedCRC >> shift) & 0xFF);
+            
+            // Overwrite serialized stream and update structural TF so they stay in sync
+            serializedBytes.data[crcInputLength + i] = byteVal;
+            tf.FECF.FECFData.data[i] = byteVal;
+        }
+        tf.FECF.FECFData.length = fecfSize;
+    }
+
+    // 5. Store the fully accurate, synchronized frame in our history log
+    m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};
+    m_finishedTransferFramesIdx++;
+
+    // 6. Send out over our ports and queues
+	cout << "writing bytes" << endl;
+    WriteBytes(serializedBytes);
+    SendToGNURadio(serializedBytes);
+    m_receptionQueue.push(serializedBytes);
+
+    if (tf.TFPH.VCID == 63) {
+        log("Finished Idle AllFramesGenerationFunction");
+    }
+}
+
+void USLP::CompletedPacketsWriterThread() {
+    // 50ms polling interval balances latency with CPU efficiency on embedded systems
+    constexpr auto TICK_RATE = std::chrono::milliseconds(50);
+    
+    while (m_running) {
+        bool processedAnyPacket = false;
+        
+        // Iterate through all Virtual Channels to check their completed packet queues
+        for (size_t i = 0; i < m_rxVirtualChannels.size(); ++i) {
+            RxVirtualChannelState& rxState = m_rxVirtualChannels[i];
+            BitBuffer<MAX_MESSAGE_LENGTH> completedPacket;
+            
+            // Drain the queue completely if multiple packets finished in this cycle
+            while (rxState.completedPacketsQueue.pop(completedPacket)) {
+                processedAnyPacket = true;
+                
+                // Determine the correct VCID associated with this state index
+                uint8_t vcid = 0;
+                if (i < m_rxVirtualChannels.size() - 1) {
+                    vcid = managedParams.virtualChannelConfigs[i].VCID;
+                } else {
+                    vcid = IDLE_VCID; // VCID 63 (OID / Idle Channel)
+                }
+                
+                // Open the file in append mode
+                std::ofstream out("PacketOutput.txt", std::ios::app);
+                
+                out << "\n\n";
+                out << "==================================" << "\n";
+                out << "     RECONSTRUCTED SPACE PACKET   " << "\n";
+                out << "==================================" << "\n";
+                out << "  Source Virtual Channel (VCID): " << static_cast<int>(vcid) << "\n";
+                out << "  Total Packet Size (Bytes)    : " << completedPacket.length << "\n";
+                out << "----------------------------------";
+
+                int lastLineIndex = 0;
+                for (size_t j = 0; j < completedPacket.length; ++j) {
+                    // Start a new line every 32 bytes to match WriteBytes formatting
+                    if ((j - lastLineIndex) % 32 == 0) {
+                        out << "\n";
+                    }
+                    
+                    out << std::setw(3) << static_cast<int>(completedPacket.data[j]) << "  ";
+                }
+                out << "\n" << "==================================" << std::endl;
+            }
+        }
+        
+        // If no packets were processed during this sweep, sleep to yield the CPU
+        if (!processedAnyPacket) {
+            std::this_thread::sleep_for(TICK_RATE);
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -413,7 +520,7 @@ int main(int argc, char* argv[]) {
 				.frameType = USLPConfig::FrameType::FIXED,
 				.VCID = 1,
 				.seqControlCountLength = 4,
-				.expeditedCountLength = 4,
+				.expeditedCountLength = 1,
 				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
 				.TFDFCompletionTimeoutMs = 100 // Higher timeout tolerated for big frames
 			},
@@ -422,7 +529,7 @@ int main(int argc, char* argv[]) {
 				.frameType = USLPConfig::FrameType::FIXED,
 				.VCID = 0,
 				.seqControlCountLength = 4,   // 4-byte frame counter width
-				.expeditedCountLength = 4,
+				.expeditedCountLength = 1,
 				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
 				.TFDFCompletionTimeoutMs = 20, // Low latency flush
 			},
@@ -431,7 +538,7 @@ int main(int argc, char* argv[]) {
 				.frameType = USLPConfig::FrameType::FIXED,
 				.VCID = 2,
 				.seqControlCountLength = 2,    // 2-byte truncated width to save space
-				.expeditedCountLength = 4,
+				.expeditedCountLength = 1,
 				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
 				.TFDFCompletionTimeoutMs = 500
 			},
@@ -440,7 +547,7 @@ int main(int argc, char* argv[]) {
 				.frameType = USLPConfig::FrameType::FIXED,
 				.VCID = 63,
 				.seqControlCountLength = 2,    // 2-byte truncated width to save space
-				.expeditedCountLength = 4,
+				.expeditedCountLength = 1,
 				.SDUType = USLPConfig::SDUType::CCSDS_PACKET,
 				.TFDFCompletionTimeoutMs = 500,
 				.interFrameDelayMs = 100
