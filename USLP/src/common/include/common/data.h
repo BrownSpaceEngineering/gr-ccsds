@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <queue>
 #include <mutex>
+#include <set>
 
 // Transfer Frame Data Lengths in bytes
 #define ZERO								0
@@ -71,6 +72,16 @@ constexpr int MAX_DATA_SIZE = MAX_TRANSFER_FRAME_LENGTH * MAX_TF_PER_MESSAGE;
 #define TFDZ_CONSTRUCTION_RULES_POS			21  // 3 bits
 #define USLP_PROTOCOL_ID_POS				16  // 5 bits
 #define FIRST_HEADER_LAST_VALID_OCTET_POS	0  // 16 bits
+
+enum ServiceType {
+	SEQUENCE_CONTROLLED = 0,
+	EXPEDITED = 1
+};
+
+enum MessageType {
+	COMMAND = 0, 
+	BITMAP = 1
+};
 
 // Fixed-size buffer structure
 template <size_t Capacity>
@@ -173,16 +184,24 @@ struct BitBuffer {
     }
 };
 
+struct PacketMetadata {
+    uint32_t sduId = 0;
+    uint8_t pvn = 0;
+    ServiceType serviceType = ServiceType::EXPEDITED;
+    size_t startIndex = 0; // Replaces the old raw index tracking
+    size_t length = 0;     // Used to compute when the packet completes
+};
+
 // Simple ring buffer for tracking packet header indices
 struct PacketPtrBuffer {
-	std::array<size_t, MAX_INCOMING_PACKETS> m_packetStartIndices;
+	std::array<PacketMetadata, MAX_INCOMING_PACKETS> m_queuedPackets;
 	size_t m_queueHead = 0;
 	size_t m_queueTail = 0;
 	size_t m_queueSize = 0;
 
-	bool push(size_t index) {
+	bool push(const PacketMetadata& metadata) {
 		if (m_queueSize >= MAX_INCOMING_PACKETS) return false;
-		m_packetStartIndices[m_queueHead] = index;
+		m_queuedPackets[m_queueHead] = metadata;
 		m_queueHead++;
 		if (m_queueHead >= MAX_INCOMING_PACKETS) m_queueHead -= MAX_INCOMING_PACKETS;
 		m_queueSize++;
@@ -199,11 +218,7 @@ struct PacketPtrBuffer {
 	}
 
 	bool isFull() {
-		if (m_queueSize <= MAX_INCOMING_PACKETS) {
-			return false;
-		} else {
-			return true;
-		}
+		return m_queueSize >= MAX_INCOMING_PACKETS;
 	}
 };
 
@@ -212,7 +227,7 @@ struct AccumulationBuffer {
 	PacketPtrBuffer packetPointers; // Stores the start of each packet header
 	uint16_t numIncomingPackets = 0;
 
-	bool insert(const uint8_t* packet, size_t length) {
+	bool insert(const uint8_t* packet, size_t length, uint32_t sduId, uint8_t pvn, ServiceType serviceType) {
 		if (length == 0) return true;
 
 		if (packetPointers.isFull()) {
@@ -223,8 +238,18 @@ struct AccumulationBuffer {
 		bool status = payloadBuffer.insertAtEnd(packet, length);
 	
 		if (status) {
-			packetPointers.push(rawStartLocation);
-		}
+            // Build the metadata object at the exact moment the packet is buffered
+            PacketMetadata meta {
+                sduId,
+                pvn,
+                serviceType,
+                rawStartLocation,
+                length
+            };
+            
+            packetPointers.push(meta);
+            numIncomingPackets++;
+        }
 
 		return status;
 	}
@@ -329,14 +354,27 @@ struct TransferFrame {
 	TFDataField TFDF;
 	OperationalControlField OCF;
 	FrameErrorControlField FECF;
+
+	std::vector<uint32_t> associatedSduIds;
 };
 
-enum MessageType {
-	COMMAND = 0, 
-	BITMAP = 1
-};
+struct PacketTransmissionTracker {
+    std::set<uint32_t> transmittedSduIds;
+    std::mutex mtx;
+    std::condition_variable cv;
 
-enum ServiceType {
-	SEQUENCE_CONTROLLED = 0,
-	EXPEDITED = 1
+    // Called by the USLP vcpNotify callback (inside the VCMultiplexer thread)
+    void markAsTransmitted(uint32_t sduId) {
+        std::lock_guard<std::mutex> lock(mtx);
+        transmittedSduIds.insert(sduId);
+        cv.notify_all(); // Wake up any threads waiting in main()
+    }
+
+    // Called by your test harness in main() to block until the packet departs
+    bool waitForTransmission(uint32_t sduId, std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mtx);
+        return cv.wait_for(lock, timeout, [this, sduId]() {
+            return transmittedSduIds.find(sduId) != transmittedSduIds.end();
+        });
+    }
 };

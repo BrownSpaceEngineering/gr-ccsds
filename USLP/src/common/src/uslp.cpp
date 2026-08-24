@@ -173,9 +173,8 @@ void USLP::VCPRequest(
 
 	if (vcidIndex >= 0) {
 		VirtualChannelAccumulator& accumulator = m_virtualChannels[vcidIndex].accumulator;
-		if (!accumulator.processIncomingPacket(packet, GVCID)) {
-			std::cerr << "Request failed to process\n";
-		}
+		
+		accumulator.processIncomingPacket(packet, GVCID, PVN, SDU_ID, serviceType);
 	} else {
 		std::cerr << "Invalid GVCID provided\n";
 	}
@@ -206,7 +205,7 @@ void USLP::VCMultiplexer() {
 			m_virtualChannels[vcidIndex].incrementFrameCount();
             
 			//log("prepare idle frame");
-			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID, {});
 			//log("finished idle frame");
         }
 	}
@@ -245,45 +244,69 @@ void USLP::VCPacketThread() {
 					
 					size_t numBytesToWrap = std::min(acc.m_fixedTfdzSize, payloadBuffer.length);
 					size_t paddingNeeded = acc.m_fixedTfdzSize - numBytesToWrap;
-					//std::cout << "numBytesToWrap: " << numBytesToWrap << "\n";
 
 					// 1. Calculate FHP and shift the metadata indices BEFORE erasing data
-					uint16_t fhp = DEFAULT_FHP; // Default: No new packet starts in this frame
+					uint16_t fhp = DEFAULT_FHP; // Default: No new packet starts in this frame (65535)
 
 					PacketPtrBuffer& headerIndices = acc.m_accumulationBuffer.packetPointers;
 					size_t consumedCount = 0;
-					//size_t newTailPointer = headerIndices.m_queueTail;
+					
+					// Local vector to track completed SDU IDs for this specific frame
+					std::vector<uint32_t> associatedSduIds;
+					associatedSduIds.reserve(32);
 
+					// --- PHASE 1: Handle Spillover Completion ---
+					// If there is an active spillover packet from a previous frame, check if it finishes here
+					if (acc.m_spilloverBytesRemaining > 0) {
+						size_t bytesConsumedInThisFrame = std::min(acc.m_spilloverBytesRemaining, numBytesToWrap);
+						acc.m_spilloverBytesRemaining -= bytesConsumedInThisFrame;
+
+						// If no bytes remain, the spillover packet has officially completed inside this frame!
+						if (acc.m_spilloverBytesRemaining == 0) {
+							associatedSduIds.push_back(acc.m_spilloverSduId);
+							acc.m_spilloverSduId = 0; // Reset spillover tracking
+						}
+					}
+
+					// --- PHASE 2: Evaluate New Packets ---
 					for (size_t count = 0; count < headerIndices.m_queueSize; count++) {
 						size_t i = (headerIndices.m_queueTail + count);
 						if (i >= MAX_INCOMING_PACKETS) i -= MAX_INCOMING_PACKETS;
 
-						size_t startIndex = headerIndices.m_packetStartIndices[i];
-						//std::cout << "start index: " << startIndex << "\n";
-						
+						// Access the detailed packet metadata we designed
+						PacketMetadata& meta = headerIndices.m_queuedPackets[i];
+						size_t startIndex = meta.startIndex;
+						size_t packetLength = meta.length;
 
 						if (startIndex < numBytesToWrap) {
 							// This packet starts inside our current frame window
 							if (fhp == DEFAULT_FHP) {
 								fhp = static_cast<uint16_t>(startIndex); // Grab the very first one
-								//std::cout << "updating fhp: " << fhp << "\n";
+							}
+
+							// Check if the entire packet fits and finishes inside this frame
+							size_t packetEndIndex = startIndex + packetLength;
+							if (packetEndIndex <= numBytesToWrap) {
+								// Packet finishes in this frame! Add SDU ID immediately
+								associatedSduIds.push_back(meta.sduId);
+							} else {
+								// Packet starts here but spills over to the next frame.
+								// Do NOT add to associatedSduIds yet. Record the spillover state.
+								acc.m_spilloverSduId = meta.sduId;
+								acc.m_spilloverBytesRemaining = packetEndIndex - numBytesToWrap;
 							}
 
 							consumedCount++;
-							// We consume this index, so we do not copy it to the 'kept' count.
 						} else {
 							// This packet starts in a future frame. Shift its offset back
-							headerIndices.m_packetStartIndices[i] = startIndex - numBytesToWrap;
+							meta.startIndex = startIndex - numBytesToWrap;
 						}
 					}
 
+					// Cleanly pop the consumed packets from the queue
 					for (size_t k = 0; k < consumedCount; k++) {
 						headerIndices.pop();
 					}
-					
-					// Update the queue size to drop the consumed indices
-					//headerIndices.m_queueTail = newTailPointer;
-					// (Note: if using a custom ring buffer, adjust your head/tail pointers instead of resize)
 
 					// 2. Construct the Transfer Frame Payload
 					BitBuffer<MAX_DATA_ZONE_LENGTH> tfdfPayload(&payloadBuffer.data[0], numBytesToWrap);
@@ -300,7 +323,8 @@ void USLP::VCPacketThread() {
 
 					lock.unlock();
 
-					PrepareTransferFrame(tfdfPayload, vc, fhp, DEFAULT_UPID);
+					// --- Passing off the metadata to PrepareTransferFrame ---
+					PrepareTransferFrame(tfdfPayload, vc, fhp, DEFAULT_UPID, associatedSduIds);
 					m_virtualChannels[vcidIndex].incrementFrameCount();
 					frameGeneratedThisTick = true;
 					
@@ -327,10 +351,13 @@ void USLP::PrepareTransferFrame(
 	BitBuffer<MAX_DATA_ZONE_LENGTH>& data, 
 	uint8_t VCID,
 	uint16_t fhp,
-    uint8_t UPID) {
+    uint8_t UPID,
+	std::vector<uint32_t> associatedSduIds) {
 	log("PrepareTransferFrame");
 	TFDataField tfdf = VCPacketProcessing(data, VCID, fhp, UPID);
 	TransferFrame tf = VCGeneration(tfdf, VCID);
+
+	tf.associatedSduIds = std::move(associatedSduIds);
 
 	if (tfdf.header.USLPProtocolIdentifier == DEFAULT_UPID) {
 		//std::cout << "Pushing into multiplexer queue\n";
@@ -423,6 +450,16 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
     WriteBytes(serializedBytes);
     SendToGNURadio(serializedBytes);
     m_receptionQueue.push(serializedBytes);
+
+	if (m_vcpNotifyCallback) {
+        uint32_t gvcid = static_cast<uint32_t>(tf.TFPH.VCID);
+        uint8_t pvn = 0b000; // Space Packet Protocol
+
+        for (uint32_t sduId : tf.associatedSduIds) {
+            // Notify the upper layer (CFDP) that this packet has physically departed
+            m_vcpNotifyCallback(gvcid, pvn, sduId, ServiceType::EXPEDITED, TRANSMITTED_SUCCESSFULLY);
+        }
+    }
 
     if (tf.TFPH.VCID == 63) {
         log("Finished Idle AllFramesGenerationFunction");
@@ -566,8 +603,18 @@ int main(int argc, char* argv[]) {
 
 	
 	USLP uslp(managedParams);
+	PacketTransmissionTracker txTracker;
+
+	// 3. Register the callback to update the tracker upon actual physical transmission
+    uslp.RegisterVcpNotifyCallback([&txTracker](uint32_t gvcid, uint8_t pvn, uint32_t sduId, ServiceType srvType, USLP::NotificationType notifyType) {
+        if (notifyType == USLP::TRANSMITTED_SUCCESSFULLY) {
+            // Signal the tracker that the packet has cleared AllFramesGenerationFunction
+            txTracker.markAsTransmitted(sduId);
+        }
+    });
+
 	//RunUslpTemporalStandardsTest();
-	RunVCPRequestMultiplexingTest(uslp);
+	RunVCPRequestMultiplexingTest(uslp, txTracker);
 
 	return 0;
 }

@@ -1,5 +1,5 @@
-#include <thread>
 #include <stdint.h> 
+#include <thread>
 #include <iostream>
 #include <iomanip>
 #include <bitset>
@@ -64,7 +64,7 @@ BitBuffer<MAX_MESSAGE_LENGTH> CreateDummyPacket(uint8_t fillByte, size_t numByte
     return packet;
 }
 
-void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
+void RunVCPRequestMultiplexingTest(USLP& uslpStack, PacketTransmissionTracker& txTracker) {
     ////std::cout << "==================================================\n";
     //std::cout << "[TEST START] Multi-VC VCPRequest Injection & Multiplexing\n";
     //std::cout << "==================================================\n";
@@ -77,18 +77,21 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     // VC 1: CFDP File Delivery (Heavy data chunks)
     // VC 2: Low-Priority Engineering Logs
     const std::vector<uint8_t> targetVCs = {0, 1, 2};
+    int cycleCount = 15;
 
     // 1. Initialize the random engine and define your range (e.g., 64 to 512 bytes)
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<size_t> sizeDistA(64, 512);
-    std::uniform_int_distribution<size_t> sizeDistB(1, 10);
+    std::uniform_int_distribution<size_t> sizeDistB(20, 80);
 
     // --- PHASE 1: PACKET INJECTION LOOP ---
     uint32_t sequenceId = 1000;
+    std::vector<uint32_t> sequenceIds;
+    sequenceIds.reserve(cycleCount * targetVCs.size());
 	//std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     
-    for (int cycle = 1; cycle <= 1; ++cycle) {
+    for (int cycle = 1; cycle <= cycleCount; ++cycle) {
         for (uint8_t vc : targetVCs) {
             sequenceId++;
 
@@ -116,6 +119,8 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 				);
 			}
 
+            sequenceIds.push_back(sequenceId);
+
             //std::cout << "[INJECT] SDU_ID: " << sequenceId << " | VC: " << static_cast<int>(vc) << " | Size: " << payloadSize << " B\n";
 
             // Simulate realistic micro-delays between packet arrivals (10ms - 25ms)
@@ -123,8 +128,16 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
     }
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    for (auto& sequence : sequenceIds) {
+        bool isTransmitted = txTracker.waitForTransmission(sequence, std::chrono::milliseconds(1500));
+        assert(isTransmitted && "Assertion Failed: Packet transmission timed out or failed to clear the physical layer!");
+    }
+
+    std::cout << "[SUCCESS] all packets have successfully completed the entire USLP pipeline!" << std::endl;
+
 	uslpStack.terminateThreads();
 
     //std::cout << "\n[TEST PHASE 1 COMPLETE] Injected " << injectionLog.size() << " packets.\n\n";

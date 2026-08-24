@@ -50,6 +50,8 @@ public:
     std::chrono::steady_clock::time_point m_lastFrameTime; // Last time a frame was transmitted
     std::chrono::steady_clock::time_point m_accumulationStartTime; // USLP-143 State tracking
     std::mutex m_bufferMtx;
+    size_t m_spilloverBytesRemaining = 0;
+    uint32_t m_spilloverSduId = 0; // Tracks the SDU ID of the current active spillover packet
 
     VirtualChannelAccumulator(size_t tfdzSize = MAX_DATA_ZONE_LENGTH) 
         : m_fixedTfdzSize(tfdzSize) {
@@ -58,11 +60,25 @@ public:
     }
 
     // Handled by VCP.request
-    bool processIncomingPacket(const BitBuffer<MAX_MESSAGE_LENGTH>& packetBytes, uint32_t GVCID) {
+    void processIncomingPacket(
+        const BitBuffer<MAX_MESSAGE_LENGTH>& packetBytes, 
+        uint32_t GVCID, 
+        uint8_t pvn, 
+        uint32_t sduId, 
+        ServiceType serviceType) {
+        
+        std::cout << "VCPRequest for SDU ID: " << sduId << "\n";
         std::lock_guard<std::mutex> lock(m_bufferMtx);
         
         m_lastPacketTime = std::chrono::steady_clock::now();
-        return m_accumulationBuffer.insert(&packetBytes.data[0], packetBytes.length);
+        
+        // Start USLP-143 timer if this is the first packet in the buffer
+        if (m_accumulationBuffer.payloadBuffer.length == 0) {
+            m_accumulationStartTime = std::chrono::steady_clock::now();
+        }
+
+        // Pass metadata to the accumulation buffer
+        m_accumulationBuffer.insert(&packetBytes.data[0], packetBytes.length, sduId, pvn, serviceType);
     }
 };
 
@@ -262,7 +278,8 @@ public:
         BitBuffer<MAX_DATA_ZONE_LENGTH>& data,
         uint8_t VCID,
         uint16_t fhp,
-        uint8_t UPID);
+        uint8_t UPID,
+        std::vector<uint32_t> associatedSduIds);
     void AllFramesGenerationFunction(TransferFrame& tf);
 
     // Receiving methods
@@ -291,6 +308,16 @@ public:
         return m_finishedTransferFrames[i];
     };
 
+    enum NotificationType {
+        TRANSMITTED_SUCCESSFULLY = 0,
+        BUFFER_OVERFLOW_DISCARDED = 1
+    };
+
+    std::function<void(uint32_t GVCID, uint8_t PVN, uint32_t SDU_ID, ServiceType srvType, NotificationType notifyType)> m_vcpNotifyCallback;
+
+    void RegisterVcpNotifyCallback(decltype(m_vcpNotifyCallback) cb) {
+        m_vcpNotifyCallback = cb;
+    }
 private:
     void InitNetworkSocket();
     void CleanupNetworkSocket();
