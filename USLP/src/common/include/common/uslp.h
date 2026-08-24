@@ -301,4 +301,10 @@ private:
     // Thread handles
     std::thread m_packetThread;
     std::thread m_multiplexerThread;
+
+    // Receive side variables
+    ThreadSafeQueue<BitBuffer<MAX_TRANSFER_FRAME_LENGTH>> m_receptionQueue; // Thread-safe queue containing raw bytes received from the C&S-SL layer
+    std::array<RxVirtualChannelState, NUM_ACTIVE_CHANNELS> m_rxVirtualChannels; // Receiving states tracked independently for each active VC
+    uint64_t m_crcErrorCount = 0; // Global counter tracking frames discarded due to checksum failures
+    std::thread m_receptionThread; // Thread handle managing the background AllFramesReception processing loop
 };

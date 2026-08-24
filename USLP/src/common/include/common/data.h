@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <queue>
+#include <mutex>
 
 // Transfer Frame Data Lengths in bytes
 #define ZERO								0
@@ -241,6 +243,42 @@ struct AccumulationBuffer {
 	}
 };
 
+// A simple, thread-safe queue for buffering completed packets per VC
+template <typename T>
+struct ThreadSafeQueue {
+    std::queue<T> m_queue;
+    std::mutex m_mtx;
+
+    void push(const T& val) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_queue.push(val);
+    }
+
+    bool pop(T& val) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        if (m_queue.empty()) return false;
+        val = m_queue.front();
+        m_queue.pop();
+        return true;
+    }
+
+    bool empty() {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        return m_queue.empty();
+    }
+};
+
+// Tracks the receiving-end state machine for each active Virtual Channel
+struct RxVirtualChannelState {
+    uint64_t lastFrameCount = 0;
+    bool firstFrameReceived = false;
+    
+    // Every VC contains an independent bitbuffer of unfinished packet bytes
+    BitBuffer<MAX_MESSAGE_LENGTH> packetAssemblerBuffer;
+    
+    // Independent queue for each Virtual Channel containing fully completed packets
+    ThreadSafeQueue<BitBuffer<MAX_MESSAGE_LENGTH>> completedPacketsQueue;
+};
 
 struct TFPrimaryHeader {
 	uint16_t TFVN = 4;

@@ -29,6 +29,7 @@ public:
     BitBuffer<FECF_DATA_LENGTH> packFrameErrorControlField(FrameErrorControlField fecf);
     BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packTransferFrame(TransferFrame tf);
 
+    TransferFrame unpackTransferFrame(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes);
 private:
     USLPConfig& managedParams;
     std::array<int8_t, MAX_VC_COUNT> &m_vcidToIndex;

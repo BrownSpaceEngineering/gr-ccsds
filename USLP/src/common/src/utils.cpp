@@ -80,3 +80,36 @@ void WriteBytes(BitBuffer<MAX_TRANSFER_FRAME_LENGTH> &serializedBytes) {
 		out << std::setw(3) << static_cast<int>(serializedBytes.data[i]) << "  ";
 	}
 }
+
+// Helper function to calculate CRC-16 or CRC-32 over the frame bytes
+uint32_t ComputeCRC(const uint8_t* data, size_t length, bool isCRC32) {
+    if (isCRC32) {
+        // Standard CRC-32 (IEEE 802.3) polynomial representation
+        uint32_t crc = 0xFFFFFFFF;
+        for (size_t i = 0; i < length; ++i) {
+            crc ^= data[i];
+            for (int j = 0; j < 8; ++j) {
+                if (crc & 1) {
+                    crc = (crc >> 1) ^ 0xEDB88320;
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+        return ~crc;
+    } else {
+        // Standard CRC-16-CCITT polynomial representation (0x1021)
+        uint16_t crc = 0xFFFF;
+        for (size_t i = 0; i < length; ++i) {
+            crc ^= (static_cast<uint16_t>(data[i]) << 8);
+            for (int j = 0; j < 8; ++j) {
+                if (crc & 0x8000) {
+                    crc = (crc << 1) ^ 0x1021;
+                } else {
+                    crc <<= 1;
+                }
+            }
+        }
+        return crc;
+    }
+}
