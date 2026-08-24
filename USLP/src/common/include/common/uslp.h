@@ -231,7 +231,7 @@ public:
         USLPContext context); // Converts part of message into the data that will be wrapped in a transfer frame
     BitBuffer<MAX_DATA_SIZE> DataToStream(MessageType type, BitBuffer<MAX_MESSAGE_LENGTH> message); // Converts higher level input data into a stream of bytes for the physical layer
 
-
+    // Sending methods
     void VCPRequest(
         BitBuffer<MAX_MESSAGE_LENGTH> packet, 
         uint32_t GVCID,
@@ -254,6 +254,13 @@ public:
         uint8_t UPID);
     void AllFramesGenerationFunction(TransferFrame& tf);
 
+    // Receiving methods
+    void AllFramesReceptionThread();
+    void AllFramesReception(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes, bool isError);
+    void VCDemultiplexing(TransferFrame& tf);
+    void VCReception(TransferFrame& tf, uint8_t VCID);
+    void VCPacketExtraction(TFDataField& TFDF, uint8_t VCID);
+
     //int8_t GetChannelByVCID(uint8_t vcid); // Returns the channel index of the VCID, -1 if invalid
     uint64_t GetFinishedTransferFramesIndex() {
         return m_finishedTransferFramesIdx;
@@ -272,7 +279,6 @@ public:
         return m_finishedTransferFrames[i];
     };
 
-    void AllFramesReception(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes);
 private:
     void InitNetworkSocket();
     void CleanupNetworkSocket();
