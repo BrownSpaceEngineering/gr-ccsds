@@ -206,7 +206,7 @@ void USLP::VCMultiplexer() {
 			m_virtualChannels[vcidIndex].incrementFrameCount();
             
 			//log("prepare idle frame");
-			//PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
+			PrepareTransferFrame(idlePayload, IDLE_VCID, DEFAULT_FHP, IDLE_UPID);
 			//log("finished idle frame");
         }
 	}
@@ -420,7 +420,6 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
     m_finishedTransferFramesIdx++;
 
     // 6. Send out over our ports and queues
-	cout << "writing bytes" << endl;
     WriteBytes(serializedBytes);
     SendToGNURadio(serializedBytes);
     m_receptionQueue.push(serializedBytes);

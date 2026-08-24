@@ -115,6 +115,8 @@ uint32_t ComputeCRC(const uint8_t* data, size_t length, bool isCRC32) {
 }
 
 void PrintPrimaryHeader(const TFPrimaryHeader& tfph) {
+    if (true) return;
+
     std::cout << "=============================================\n";
     std::cout << "       USLP TRANSFER FRAME PRIMARY HEADER    \n";
     std::cout << "=============================================\n";

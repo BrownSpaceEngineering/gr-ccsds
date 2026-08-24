@@ -76,7 +76,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     // VC 0: High-Priority Spacecraft Commands / Real-Time Telemetry
     // VC 1: CFDP File Delivery (Heavy data chunks)
     // VC 2: Low-Priority Engineering Logs
-    const std::vector<uint8_t> targetVCs = {0};
+    const std::vector<uint8_t> targetVCs = {0, 1, 2};
 
     // 1. Initialize the random engine and define your range (e.g., 64 to 512 bytes)
     std::random_device rd;
@@ -88,14 +88,14 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack) {
     uint32_t sequenceId = 1000;
 	//std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     
-    for (int cycle = 1; cycle <= 15; ++cycle) {
+    for (int cycle = 1; cycle <= 1; ++cycle) {
         for (uint8_t vc : targetVCs) {
             sequenceId++;
 
             // Vary packet sizes: CFDP on VC 1 gets larger chunks
             size_t payloadSize = (vc == 1) ? sizeDistB(gen) : sizeDistA(gen);
             uint8_t patternByte = static_cast<uint8_t>((vc << 4) | (cycle & 0x0F));
-			////std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << "\n";
+			std::cout << "pattern Byte: " << static_cast<uint32_t>(patternByte) << " with payload size of " << payloadSize << endl;
             
             BitBuffer<MAX_MESSAGE_LENGTH> packet = CreateDummyPacket(patternByte, payloadSize);
 			////std::cout << "dummy packet last byte: " << static_cast<uint32_t>(packet.data[packet.length - 1]) << "\n";
