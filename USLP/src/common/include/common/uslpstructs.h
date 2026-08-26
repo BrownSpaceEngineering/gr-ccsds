@@ -38,7 +38,7 @@ struct USLPConfig {
 
     struct PhysicalChannel {
         std::string physicalChannelName;		   // USLP-113
-        FrameType frameType;                       // USLP-114
+        FrameType frameType = FrameType::FIXED;    // USLP-114
         uint16_t transferFrameLength = 1024;       // USLP-115
         uint8_t TFVN = 0b1100;                     // USLP-116
         uint8_t MCMultiplexingScheme;              // USLP-117
@@ -107,4 +107,42 @@ struct USLPConfig {
 // Struct used to store the context of a specific packet being processed
 struct USLPContext {
     uint8_t currentVCID;
+};
+
+struct CCS_SLConfig {
+    enum class Randomizer {
+        SHORT,
+        LONG
+    };
+
+    enum class CodingMethod {
+        NONE,
+        CONVOLUTIONAL,
+        REED_SOLOMON,
+        CONCATENATED,
+        TURBO,
+        LDPC
+    };
+
+    enum class CodeRates {
+        ONE_HALF,
+        TWO_THIRDS,
+        THREE_FOURTHS,
+        FIVE_SIXTHS,
+        SEVEN_EIGHTHS
+    };
+
+    struct SelectedOptions {
+        Randomizer randomizer = Randomizer::LONG;
+        CodingMethod codingMethod = CodingMethod::CONVOLUTIONAL; // Convolutional on satellite, None on ground
+    };
+
+    struct ConvolutionalCodeConfig {
+        CodeRates codeRate = CodeRates::ONE_HALF;
+        bool slicing = false; // should always be false
+        uint16_t transferFrameLength = MAX_TRANSFER_FRAME_LENGTH - ASM_LENGTH;
+    };
+
+    SelectedOptions selectedOptions;
+    ConvolutionalCodeConfig convolutionalCodeConfig;
 };

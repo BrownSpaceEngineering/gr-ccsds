@@ -135,6 +135,7 @@ BitBuffer<FECF_DATA_LENGTH> USLPPacker::packFrameErrorControlField(FrameErrorCon
 BitBuffer<MAX_TRANSFER_FRAME_LENGTH> USLPPacker::packTransferFrame(TransferFrame tf) {
     BitBuffer<MAX_TRANSFER_FRAME_LENGTH> packed;
     //std::cout << "packPrimary" << std::endl;
+
 	BitBuffer<PRIMARY_HEADER_LENGTH> packedPrimaryHeader = packPrimaryHeader(tf.TFPH);
     
     //std::cout << "\n";

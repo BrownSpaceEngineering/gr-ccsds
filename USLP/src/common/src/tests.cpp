@@ -128,7 +128,7 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack, PacketTransmissionTracker& t
 			std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
     }
-    
+
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
 
     for (auto& sequence : sequenceIds) {
@@ -265,7 +265,8 @@ void RunUslpTemporalStandardsTest() {
     };
 
     // Instantiate stack
-    USLP uslp(testParams);
+    CCS_SLConfig ccs_slConfig;
+	USLP uslp(testParams, ccs_slConfig);
 
     // Give background threads a brief moment to spin up
     std::this_thread::sleep_for(std::chrono::milliseconds(50));

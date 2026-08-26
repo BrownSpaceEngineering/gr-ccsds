@@ -23,7 +23,7 @@ void USLP::CleanupNetworkSocket() {
     }
 }
 
-void USLP::SendToGNURadio(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes) {
+void USLP::SendToGNURadio(const BitBuffer<MAX_CCS_SL_FRAME_LENGTH>& serializedBytes) {
     //std::cout << "Sending bytes to GNU Radio Module...\n";
 
     if (m_socketFd < 0) {

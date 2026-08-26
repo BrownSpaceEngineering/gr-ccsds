@@ -17,6 +17,7 @@
 #include <common/packing.h>
 #include <common/utils.h>
 #include <common/uslpstructs.h>
+#include <common/ccs_sl.h>
 #include <string>
 #include <string_view>
 #include <set>
@@ -141,10 +142,12 @@ inline std::string_view ToString(USLPConfig::COPType type) {
 
 class USLP {
 public:
-    USLP(USLPConfig& managedParams) 
+    USLP(USLPConfig& managedParams, const CCS_SLConfig& managedParamsCCS_SL) 
         : packer(managedParams, m_vcidToIndex), 
-          managedParams(managedParams),
-          m_running(true) 
+        managedParams(managedParams),
+        managedParamsCCS_SL(managedParamsCCS_SL),
+        ccs_sl(this->managedParamsCCS_SL),
+        m_running(true) 
     {
         PrintVirtualChannelConfigs();
 
@@ -321,18 +324,21 @@ public:
 private:
     void InitNetworkSocket();
     void CleanupNetworkSocket();
-    void SendToGNURadio(const BitBuffer<MAX_TRANSFER_FRAME_LENGTH>& serializedBytes);
+    void SendToGNURadio(const BitBuffer<MAX_CCS_SL_FRAME_LENGTH>& serializedBytes);
 
     int m_socketFd = -1;
     sockaddr_in m_gnuRadioAddr{};
 
     std::array<int8_t, MAX_VC_COUNT> m_vcidToIndex{5};
-    USLPPacker packer;
-    USLPConfig managedParams;
     std::array<VirtualChannel, NUM_ACTIVE_CHANNELS> m_virtualChannels{};
     ThreadSafeMultiplexerQueue<TransferFrame> m_frameMultiplexerQueue;
     std::array<TFAllFormats, maxFinishedTransferFrames> m_finishedTransferFrames;
     uint64_t m_finishedTransferFramesIdx = 0;
+
+    USLPPacker packer;
+    USLPConfig managedParams;
+    CCS_SLConfig managedParamsCCS_SL;
+    CCS_SL ccs_sl;
 
     bool m_running = true;
     std::mutex m_multiplexerMtx;
@@ -347,4 +353,6 @@ private:
     uint64_t m_crcErrorCount = 0; // Global counter tracking frames discarded due to checksum failures
     std::thread m_receptionThread; // Thread handle managing the background AllFramesReception processing loop
     std::thread m_packetsWriterThread; // Writes received packets out to disc
+
+    const uint8_t CCSDS_ASM[4] = {0x1A, 0xCF, 0xFC, 0x1D};
 };

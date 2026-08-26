@@ -63,7 +63,7 @@ void ClearFile() {
 }
 
 // Writes Bytes to .txt assuming maximum transfer frame capacity
-void WriteBytes(BitBuffer<MAX_TRANSFER_FRAME_LENGTH> &serializedBytes) {
+void WriteBytes(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes) {
 	std::ofstream out("TestOutput.txt", std::ios::app);
 	int lastTFIndex = 0;
 	out << "\n";

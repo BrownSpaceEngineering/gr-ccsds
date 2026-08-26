@@ -68,6 +68,7 @@ class USLP_DSP(gr.top_block, Qt.QWidget):
         self.samp_rate = samp_rate = 51200
         self.qpsk_constellation = qpsk_constellation = digital.constellation_qpsk().base()
         self.qpsk_constellation.set_npwr(1.0)
+        self.is_groundstation = is_groundstation = True
 
         ##################################################
         # Blocks
@@ -134,10 +135,14 @@ class USLP_DSP(gr.top_block, Qt.QWidget):
             verbose=False,
             log=False,
             truncate=False)
-        self.blocks_vector_source_x_0 = blocks.vector_source_b((1, 0, 0, 0, 1, 0, 1, 0), True, 1, [])
+        self.blocks_vector_source_x_0 = blocks.vector_source_b((1, 0, 0, 0, 1, 1, 0, 1), True, 1, [])
         self.blocks_throttle2_0 = blocks.throttle( gr.sizeof_char*1, samp_rate, True, 0 if "auto" == "auto" else max( int(float(0.1) * samp_rate) if "auto" == "time" else int(0.1), 1) )
+        self.blocks_selector_0 = blocks.selector(gr.sizeof_char*1,0,0 if is_groundstation else 1)
+        self.blocks_selector_0.set_enabled(True)
+        self.blocks_null_sink_0 = blocks.null_sink(gr.sizeof_char*1)
         self.blocks_multiply_xx_0 = blocks.multiply_vcc(1)
         self.analog_sig_source_x_0 = analog.sig_source_c(samp_rate, analog.GR_COS_WAVE, (samp_rate/(samples_per_symbol*4)), 1, 0, 0)
+        self.analog_sig_source_x_0.set_block_alias("Carrier")
 
 
         ##################################################
@@ -145,7 +150,9 @@ class USLP_DSP(gr.top_block, Qt.QWidget):
         ##################################################
         self.connect((self.analog_sig_source_x_0, 0), (self.blocks_multiply_xx_0, 1))
         self.connect((self.blocks_multiply_xx_0, 0), (self.qtgui_time_sink_x_1, 0))
-        self.connect((self.blocks_throttle2_0, 0), (self.digital_constellation_modulator_0, 0))
+        self.connect((self.blocks_selector_0, 1), (self.blocks_null_sink_0, 0))
+        self.connect((self.blocks_selector_0, 0), (self.digital_constellation_modulator_0, 0))
+        self.connect((self.blocks_throttle2_0, 0), (self.blocks_selector_0, 0))
         self.connect((self.blocks_vector_source_x_0, 0), (self.blocks_throttle2_0, 0))
         self.connect((self.digital_constellation_modulator_0, 0), (self.filter_fft_rrc_filter_0, 0))
         self.connect((self.filter_fft_rrc_filter_0, 0), (self.blocks_multiply_xx_0, 0))
@@ -183,6 +190,13 @@ class USLP_DSP(gr.top_block, Qt.QWidget):
 
     def set_qpsk_constellation(self, qpsk_constellation):
         self.qpsk_constellation = qpsk_constellation
+
+    def get_is_groundstation(self):
+        return self.is_groundstation
+
+    def set_is_groundstation(self, is_groundstation):
+        self.is_groundstation = is_groundstation
+        self.blocks_selector_0.set_output_index(0 if self.is_groundstation else 1)
 
 
 

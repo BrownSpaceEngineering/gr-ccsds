@@ -18,7 +18,9 @@
 class USLPPacker {
 public:
     USLPPacker(USLPConfig& config, std::array<int8_t, MAX_VC_COUNT>& vcidMap)
-        : managedParams(config), m_vcidToIndex(vcidMap) {}
+        : managedParams(config), m_vcidToIndex(vcidMap) {
+            packedAsm.insert(0, CCSDS_ASM, ASM_LENGTH);
+        }
 
     template <size_t Capacity> BitBuffer<Capacity> packInteger(uint64_t value, size_t numBytes);
     BitBuffer<PRIMARY_HEADER_LENGTH> packPrimaryHeader(TFPrimaryHeader tfph);
@@ -33,4 +35,6 @@ public:
 private:
     USLPConfig& managedParams;
     std::array<int8_t, MAX_VC_COUNT> &m_vcidToIndex;
+    const uint8_t CCSDS_ASM[4] = {0x1A, 0xCF, 0xFC, 0x1D};
+    BitBuffer<ASM_LENGTH> packedAsm;
 };

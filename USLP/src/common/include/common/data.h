@@ -17,20 +17,22 @@
 #include <set>
 
 // Transfer Frame Data Lengths in bytes
-#define ZERO								0
-#define MAX_SECURITY_HEADER_LENGTH 			20
-#define MAX_SECURITY_TRAILER_LENGTH 		20
-constexpr uint16_t MAX_DATA_FIELD_LENGTH =  1012;  	// MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-constexpr uint16_t MAX_DATA_ZONE_LENGTH =   1009; 	// MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-#define MAX_INSERT_ZONE_LENGTH				1024  	// Apparently specified to worst case take maximum TF size
-#define OCF_DATA_LENGTH 					4
-#define CRC16_DATA_LENGTH 					2
-#define CRC32_DATA_LENGTH 					4
-#define FECF_DATA_LENGTH 					4 		// Default FECF using CRC32
-#define MAX_TRANSFER_FRAME_LENGTH 			1024
-#define PRIMARY_HEADER_LENGTH				8
-#define DATA_FIELD_HEADER_LENGTH			3
-constexpr uint8_t CCSDS_EIP_HEADER = 0xE0;			// Define the standard 1-byte CCSDS Encapsulation Idle Packet (EIP) header
+#define ZERO									0
+#define MAX_SECURITY_HEADER_LENGTH 				20
+#define MAX_SECURITY_TRAILER_LENGTH 			20
+constexpr uint16_t MAX_DATA_FIELD_LENGTH =  	1012;  	// MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+constexpr uint16_t MAX_DATA_ZONE_LENGTH =   	1009; 	// MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
+#define MAX_INSERT_ZONE_LENGTH					1024  	// Apparently specified to worst case take maximum TF size
+#define OCF_DATA_LENGTH 						4
+#define CRC16_DATA_LENGTH 						2
+#define CRC32_DATA_LENGTH 						4
+#define FECF_DATA_LENGTH 						4 		// Default FECF using CRC32
+constexpr uint8_t ASM_LENGTH =					4;
+constexpr uint16_t MAX_TRANSFER_FRAME_LENGTH =  1024 + ASM_LENGTH;
+constexpr uint16_t MAX_CCS_SL_FRAME_LENGTH =    2 * MAX_TRANSFER_FRAME_LENGTH;
+#define PRIMARY_HEADER_LENGTH					8
+#define DATA_FIELD_HEADER_LENGTH				3
+constexpr uint8_t CCSDS_EIP_HEADER = 0xE0;				// Define the standard 1-byte CCSDS Encapsulation Idle Packet (EIP) header
 
 // Upper Level Macros
 #define MAX_TF_PER_MESSAGE						65 				// Most transfer frames we will ever use for one message

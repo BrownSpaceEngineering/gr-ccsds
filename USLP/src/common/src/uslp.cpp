@@ -446,10 +446,18 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
     m_finishedTransferFrames[m_finishedTransferFramesIdx] = TFAllFormats{tf, serializedBytes};
     m_finishedTransferFramesIdx++;
 
+	cout << "Length of serialized bytes: " << serializedBytes.length << endl;
+	
+	std::vector<uint8_t> physicalBytes = ccs_sl.ProcessFrame(serializedBytes);
+	BitBuffer<MAX_CCS_SL_FRAME_LENGTH> physicalFrameBuffer(physicalBytes.data(), physicalBytes.size());
+	cout << "Length of physical bytes: " << physicalFrameBuffer.length << endl;
+
     // 6. Send out over our ports and queues
-    WriteBytes(serializedBytes);
-    SendToGNURadio(serializedBytes);
+    WriteBytes(physicalFrameBuffer);
+    SendToGNURadio(physicalFrameBuffer);
     m_receptionQueue.push(serializedBytes);
+
+
 
 	if (m_vcpNotifyCallback) {
         uint32_t gvcid = static_cast<uint32_t>(tf.TFPH.VCID);
@@ -523,6 +531,15 @@ void USLP::CompletedPacketsWriterThread() {
 
 int main(int argc, char* argv[]) {
 	std::cout << "started running\n";
+	/*CCS_SLConfig m_config;
+	CCS_SL test(m_config);
+	std::vector<uint8_t> bits = {0b10001010, 0b01101110};
+	test.EncodeAndTransmit(bits.data(), 1);
+
+	for (int i = 0; i < bits.size(); i++) {
+		cout << std::bitset<8>(bits[i]) << endl;
+	}*/
+
 	ClearFile();
 	// 2. Initialize your complete USLP Configuration
 	USLPConfig managedParams {
@@ -601,8 +618,8 @@ int main(int argc, char* argv[]) {
 		}
 	};
 
-	
-	USLP uslp(managedParams);
+	CCS_SLConfig ccs_slConfig;
+	USLP uslp(managedParams, ccs_slConfig);
 	PacketTransmissionTracker txTracker;
 
 	// 3. Register the callback to update the tracker upon actual physical transmission
