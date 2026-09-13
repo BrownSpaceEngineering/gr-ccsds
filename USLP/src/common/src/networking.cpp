@@ -24,8 +24,7 @@ void USLP::CleanupNetworkSocket() {
 }
 
 void USLP::SendToGNURadio(const BitBuffer<MAX_CCS_SL_FRAME_LENGTH>& serializedBytes) {
-    //std::cout << "Sending bytes to GNU Radio Module...\n";
-
+    
     if (m_socketFd < 0) {
         return; // Socket not initialized or closed
     }
@@ -43,6 +42,6 @@ void USLP::SendToGNURadio(const BitBuffer<MAX_CCS_SL_FRAME_LENGTH>& serializedBy
     if (sentBytes < 0) {
         std::cerr << "[WARNING] VCMultiplexer dropped frame transmission over network socket\n";
     } else {
-        //std::cout << "Sent bytes to GNU Radio Module!\n";
+        std::cout << "Sent bytes to GNU Radio Module!\n";
     }
 }

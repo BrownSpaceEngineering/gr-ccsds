@@ -71,9 +71,9 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 		tfph.VCFrameCount = m_virtualChannels[vcidIndex].vcFrameCount;
 		log("vc frame count length: ", tfph.VCFrameCountLength);
 		log("vc frame count: ", tfph.VCFrameCount);
-		std::cout << std::endl;
-		std::cout << "vcid: " << static_cast<int>(VCID) << std::endl;
-		std::cout << "vc frame count: " << tfph.VCFrameCount << std::endl;
+		//std::cout << std::endl;
+		//std::cout << "vcid: " << static_cast<int>(VCID) << std::endl;
+		//std::cout << "vc frame count: " << tfph.VCFrameCount << std::endl;
 	}
 
 	log("GetPrimaryHeader2");
@@ -364,7 +364,7 @@ void USLP::PrepareTransferFrame(
 		std::lock_guard<std::mutex> lock(m_multiplexerMtx);
 		m_frameMultiplexerQueue.push(std::move(tf));
 	} else if (tfdf.header.USLPProtocolIdentifier == IDLE_UPID) {
-		AllFramesGenerationFunction(tf);
+		//AllFramesGenerationFunction(tf);
 		//std::cout << "OID all frames generation hs been finshed\n";
 	} else {
 		std::cerr << "Unknown UPID, dropping frame\n";
@@ -456,8 +456,6 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
     WriteBytes(physicalFrameBuffer);
     SendToGNURadio(physicalFrameBuffer);
     m_receptionQueue.push(serializedBytes);
-
-
 
 	if (m_vcpNotifyCallback) {
         uint32_t gvcid = static_cast<uint32_t>(tf.TFPH.VCID);

@@ -7,10 +7,16 @@ CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {}
 // Coordinates the physical layer execution sequence and returns the finished data
 std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physicalLength) {
     // 1. Pseudorandomisation (scrambling)
-    if (m_config.selectedOptions.randomizer == CCS_SLConfig::Randomizer::LONG) {
-        PseudoRandomize(physicalData, physicalLength);
-    } else {
-        std::cerr << "Randomization scheme should be long" << std::endl;
+    switch (m_config.selectedOptions.randomizer) {
+        case CCS_SLConfig::Randomizer::LONG:
+            PseudoRandomize(physicalData, physicalLength);
+            break;
+        case CCS_SLConfig::Randomizer::NONE:
+            // Bypassed: frame passes through unscrambled
+            break;
+        case CCS_SLConfig::Randomizer::SHORT:
+            std::cerr << "Short randomizer not implemented, frame left unscrambled" << std::endl;
+            break;
     }
 
     // 2. Channel Coding

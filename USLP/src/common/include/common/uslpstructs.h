@@ -111,6 +111,7 @@ struct USLPContext {
 
 struct CCS_SLConfig {
     enum class Randomizer {
+        NONE,
         SHORT,
         LONG
     };
@@ -133,8 +134,10 @@ struct CCS_SLConfig {
     };
 
     struct SelectedOptions {
-        Randomizer randomizer = Randomizer::LONG;
-        CodingMethod codingMethod = CodingMethod::CONVOLUTIONAL; // Convolutional on satellite, None on ground
+        // TEMPORARY: physical layer bypassed so raw (ASM + transfer frame) bytes reach GNU Radio
+        // while the QPSK demodulator is brought up. Restore to LONG / CONVOLUTIONAL afterwards.
+        Randomizer randomizer = Randomizer::NONE;        // Normally LONG
+        CodingMethod codingMethod = CodingMethod::NONE;  // Normally CONVOLUTIONAL on satellite, None on ground
     };
 
     struct ConvolutionalCodeConfig {

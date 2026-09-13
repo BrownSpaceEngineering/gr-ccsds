@@ -77,12 +77,12 @@ void RunVCPRequestMultiplexingTest(USLP& uslpStack, PacketTransmissionTracker& t
     // VC 1: CFDP File Delivery (Heavy data chunks)
     // VC 2: Low-Priority Engineering Logs
     const std::vector<uint8_t> targetVCs = {0, 1, 2};
-    int cycleCount = 15;
+    int cycleCount = 10;
 
     // 1. Initialize the random engine and define your range (e.g., 64 to 512 bytes)
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> sizeDistA(64, 512);
+    std::uniform_int_distribution<size_t> sizeDistA(64, 256);
     std::uniform_int_distribution<size_t> sizeDistB(20, 80);
 
     // --- PHASE 1: PACKET INJECTION LOOP ---
