@@ -39,16 +39,38 @@
 /*
  * Maximum number of missing-segment gap pairs in a single NAK PDU.
  * Each pair is two 32-bit offsets (8 bytes). 64 gaps × 8 = 512 bytes of NAK payload
+ *
+ * This is a *per-PDU* limit only. The number of gaps an entity can track
+ * in memory (cfdp2_gap_list_t) is independent and grows with the file;
+ * when there are more gaps than fit in one NAK the receiver sends several.
  */
 #define CFDP_MAX_NAK_GAPS      64
+
+/*
+ * Initial capacity of a gap list.  Lists grow by doubling as needed.
+ * 8 bytes per gap, so 256 gaps = 2 KiB.
+ */
+#define CFDP_GAP_LIST_INITIAL  256
 
 /* Retransmission / ACK timer defaults (seconds) */
 #define CFDP_ACK_TIMEOUT_S      5
 #define CFDP_ACK_RETRY_LIMIT    3
 
-/* How long the receiver waits for straggling data after EOF (seconds) */
+/*
+ * How long the receiver waits for straggling data after EOF (seconds)
+ * before re-issuing its NAK.  The retry counter resets every time new
+ * data arrives, so the limit bounds *consecutive silent* rounds rather
+ * than total NAK rounds — a lossy but live link keeps going.
+ */
 #define CFDP_CHECK_TIMEOUT_S    5
 #define CFDP_CHECK_RETRY_LIMIT  3
+
+/*
+ * Minimum spacing between "please resend Metadata" NAKs the receiver
+ * emits while it is getting data for a transaction it has no Metadata
+ * for (seconds).
+ */
+#define CFDP_METADATA_NAK_INTERVAL_S 1
 
 /* -----------------------------------------------------------------------
  * Finished PDU (5.2.3)
@@ -166,6 +188,42 @@ int cfdp2_decode_nak(const uint8_t *buf, size_t buf_len,
                      cfdp_nak_pdu_t *nak);
 
 /* -----------------------------------------------------------------------
+ * Gap list — growable, sorted array of missing byte ranges
+ *
+ * Used by the receiver to track what has NOT arrived yet, and by the
+ * sender to accumulate the gaps reported across one or more NAK PDUs.
+ * Entries are kept sorted and non-overlapping.
+ *
+ * Storage is heap-allocated and grows by doubling.  If an allocation
+ * fails the list is left unchanged and the operation reports failure;
+ * callers fall back to conservative behaviour (over-NAK / over-send)
+ * so correctness never depends on a successful grow.
+ * ---------------------------------------------------------------------- */
+
+typedef struct {
+    cfdp_nak_gap_t *gaps;
+    uint32_t        count;
+    uint32_t        capacity;
+} cfdp2_gap_list_t;
+
+/** Allocate initial storage. Returns CFDP_ERR_IO on OOM. */
+cfdp_status_t cfdp2_gap_list_init(cfdp2_gap_list_t *gl);
+
+void cfdp2_gap_list_free(cfdp2_gap_list_t *gl);
+
+/** Reset to a single gap [0, file_size), or empty if file_size == 0. */
+cfdp_status_t cfdp2_gap_list_reset(cfdp2_gap_list_t *gl, uint32_t file_size);
+
+/** Remove [recv_start, recv_end) from the list (data arrived). */
+cfdp_status_t cfdp2_gap_list_mark_received(cfdp2_gap_list_t *gl,
+                                           uint32_t recv_start,
+                                           uint32_t recv_end);
+
+/** Add [start, end) to the list, merging with overlapping/adjacent gaps. */
+cfdp_status_t cfdp2_gap_list_add(cfdp2_gap_list_t *gl,
+                                 uint32_t start, uint32_t end);
+
+/* -----------------------------------------------------------------------
  * Class 2 Sender
  *
  * The Class 2 sender extends the Class 1 sender_t state with fields
@@ -211,12 +269,14 @@ typedef struct {
 
     /*
      * Pending NAK gaps received from the receiver.
-     * Populated when we get a NAK PDU; consumed during RETRANSMIT.
+     * Populated (merged) from every NAK PDU; consumed during RETRANSMIT.
      */
-    cfdp_nak_gap_t  nak_gaps[CFDP_MAX_NAK_GAPS];
-    uint32_t        nak_gap_count;
+    cfdp2_gap_list_t nak_gaps;
     uint32_t        retransmit_gap_idx;   /* which gap we're currently replaying */
     uint32_t        retransmit_offset;    /* current seek position within the gap */
+
+    /* Receiver asked for Metadata again (NAK gap [0,0) per 4.6.4.3). */
+    bool            metadata_requested;
 
     /* ACK / retry timer state */
     time_t   eof_sent_time;     /* wall time when last EOF was sent */
@@ -272,17 +332,6 @@ typedef enum {
     CFDP2_RECV_CANCELLED,
 } cfdp2_recv_state_t;
 
-/*
- * Gap list tracks which byte ranges have NOT yet been received.
- * Initialised to [{0, file_size}] and shrunk as data arrives.
- * We use a simple sorted array; with at most CFDP_MAX_NAK_GAPS entries
- * this is O(n) but n is tiny for CubeSat payloads.
- */
-typedef struct {
-    cfdp_nak_gap_t gaps[CFDP_MAX_NAK_GAPS];
-    uint32_t       count;
-} cfdp2_gap_list_t;
-
 typedef struct {
     cfdp2_recv_state_t state;
 
@@ -292,7 +341,10 @@ typedef struct {
     uint8_t  entity_id_len;
     uint8_t  seq_num_len;
 
-    bool     got_metadata;
+    bool     tx_latched;      /* source id / seq num learned from first PDU */
+    bool     got_metadata;    /* Metadata PDU actually received            */
+    bool     got_eof;         /* EOF received (file size + checksum known) */
+    time_t   last_metadata_nak_time;
     char     dst_filename[CFDP_MAX_FILENAME_LEN + 1];
     uint32_t expected_file_size;
     uint32_t expected_checksum;

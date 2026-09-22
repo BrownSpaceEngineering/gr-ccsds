@@ -14,17 +14,19 @@
  *   SEND_EOF: step(): send EOF PDU, start ACK timer ► AWAIT_EOF_ACK
  *
  *   AWAIT_EOF_ACK: step(): poll recv()
- *          ACK(EOF) received ->► AWAIT_FINISHED
- *          NAK received (before ACK) -> (buffer gaps, stay)
+ *          ACK(EOF) received -> AWAIT_FINISHED
+ *          NAK received -> RETRANSMIT  (the receiver only NAKs after it
+ *                          has seen EOF, so a NAK is an implicit ACK(EOF))
  *          timer expired, retry < limit -> SEND_EOF (resend)
  *          timer expired, retry >= limit -> CANCELLED
  *
  *   AWAIT_FINISHED: step(): poll recv()
  *          NAK received -> RETRANSMIT
  *          Finished received -> send ACK(Finished) → FINISHED
- *          inactivity timeout -> CANCELLED
+ *          inactivity timeout (no PDU of any kind) -> CANCELLED
  *
- *   RETRANSMIT: step(): replay one segment per call from nak_gaps[]
+ *   RETRANSMIT: step(): replay one segment per call from nak_gaps
+ *          Metadata requested? re-send Metadata first
  *          all gaps replayed -> AWAIT_FINISHED
  *
  *   FINISHED / CANCELLED - terminal
@@ -35,10 +37,13 @@
  *   transport already sets SO_RCVTIMEO = 2 s, which is fine.
  *
  * NAK handling:
- *   NAKs carry a list of missing byte-range gaps.  We store all pending
- *   gaps in s->nak_gaps[].  In RETRANSMIT we seek the file to each gap
- *   and re-send segments until the gap is covered, advancing
- *   s->retransmit_offset within the current gap each step() call.
+ *   NAKs carry a list of missing byte-range gaps; a receiver with more
+ *   gaps than fit in one PDU sends several NAKs back to back.  Every
+ *   gap is merged into s->nak_gaps (a growable, coalescing list).  In
+ *   RETRANSMIT we seek the file to each gap and re-send segments until
+ *   the gap is covered, advancing s->retransmit_offset within the
+ *   current gap each step() call.  A gap of [0,0) is the receiver's
+ *   request for the Metadata PDU to be re-sent.
  */
 
 #include "cfdp_class2.h"
@@ -116,6 +121,35 @@ static cfdp_status_t do_send_eof(cfdp2_sender_t *s)
            s->checksum, s->file_size, s->eof_retry_count);
 
     s->eof_sent_time = time(NULL);
+    return CFDP_OK;
+}
+
+/* -----------------------------------------------------------------------
+ * Internal: send the Metadata PDU (initially, and again on request)
+ * ---------------------------------------------------------------------- */
+
+static cfdp_status_t do_send_metadata(cfdp2_sender_t *s)
+{
+    uint8_t data_field[CFDP_MAX_PDU_SIZE];
+
+    cfdp_metadata_pdu_t meta = {
+        .closure_requested = true,   /* Class 2 always requests closure */
+        .checksum_type     = CFDP_CHECKSUM_MODULAR,
+        .file_size         = s->file_size,
+    };
+    strncpy(meta.src_filename, s->src_filename, CFDP_MAX_FILENAME_LEN);
+    strncpy(meta.dst_filename, s->dst_filename, CFDP_MAX_FILENAME_LEN);
+
+    int encoded = cfdp_encode_metadata(&meta, data_field, sizeof(data_field));
+    if (encoded < 0) return (cfdp_status_t)encoded;
+
+    cfdp_status_t rc = send_pdu(s, CFDP_PDU_FILE_DIRECTIVE,
+                                CFDP_DIR_TOWARD_RECEIVER,
+                                data_field, (uint16_t)encoded);
+    if (rc != CFDP_OK) return rc;
+
+    printf("[SENDER2] Sent Metadata: '%s' → '%s', size=%u\n",
+           s->src_filename, s->dst_filename, s->file_size);
     return CFDP_OK;
 }
 
@@ -205,24 +239,20 @@ static cfdp_status_t process_incoming(cfdp2_sender_t *s,
 
         printf("[SENDER2] Received NAK: %u gap(s)\n", nak.gap_count);
 
-        /* Merge NAK gaps into our pending list, avoiding duplicates.
-         * Simple strategy: append only gaps not already present. */
+        /* Merge NAK gaps into our pending list; overlapping and adjacent
+         * ranges coalesce, so repeated NAKs never inflate the list. */
         for (uint32_t i = 0; i < nak.gap_count; i++) {
-            /* Check for an exact duplicate */
-            bool duplicate = false;
-            for (uint32_t j = 0; j < s->nak_gap_count; j++) {
-                if (s->nak_gaps[j].start == nak.gaps[i].start &&
-                    s->nak_gaps[j].end   == nak.gaps[i].end) {
-                    duplicate = true;
-                    break;
-                }
+            if (nak.gaps[i].start == 0 && nak.gaps[i].end == 0) {
+                printf("[SENDER2]   Metadata requested\n");
+                s->metadata_requested = true;
+                continue;
             }
-            if (!duplicate && s->nak_gap_count < CFDP_MAX_NAK_GAPS) {
-                s->nak_gaps[s->nak_gap_count++] = nak.gaps[i];
-                printf("[SENDER2]   gap [%u, %u)\n",
-                       nak.gaps[i].start, nak.gaps[i].end);
-            }
+            cfdp_status_t grc = cfdp2_gap_list_add(&s->nak_gaps,
+                                                   nak.gaps[i].start,
+                                                   nak.gaps[i].end);
+            if (grc != CFDP_OK) return grc;
         }
+        printf("[SENDER2]   pending gaps now: %u\n", s->nak_gaps.count);
 
     } else if (code == CFDP_DIRECTIVE_FINISHED) {
         cfdp_finished_pdu_t fin;
@@ -264,7 +294,7 @@ cfdp_status_t cfdp2_sender_init(cfdp2_sender_t *s,
     s->segment_size      = segment_size ? segment_size : 512u;
     s->transport         = transport;
     s->file_fd           = -1;
-    return CFDP_OK;
+    return cfdp2_gap_list_init(&s->nak_gaps);
 }
 
 cfdp_status_t cfdp2_sender_start(cfdp2_sender_t *s,
@@ -291,7 +321,8 @@ cfdp_status_t cfdp2_sender_start(cfdp2_sender_t *s,
 
     s->bytes_sent      = 0;
     s->checksum        = CFDP_MODULAR_SUM_INIT;
-    s->nak_gap_count   = 0;
+    s->nak_gaps.count  = 0;
+    s->metadata_requested = false;
     s->eof_retry_count = 0;
     s->state           = CFDP2_SENDER_SEND_METADATA;
     return CFDP_OK;
@@ -306,23 +337,8 @@ cfdp_status_t cfdp2_sender_step(cfdp2_sender_t *s)
     switch (s->state) {
 
     case CFDP2_SENDER_SEND_METADATA: {
-        cfdp_metadata_pdu_t meta = {
-            .closure_requested = true,   /* Class 2 always requests closure */
-            .checksum_type     = CFDP_CHECKSUM_MODULAR,
-            .file_size         = s->file_size,
-        };
-        strncpy(meta.src_filename, s->src_filename, CFDP_MAX_FILENAME_LEN);
-        strncpy(meta.dst_filename, s->dst_filename, CFDP_MAX_FILENAME_LEN);
-
-        encoded = cfdp_encode_metadata(&meta, data_field, sizeof(data_field));
-        if (encoded < 0) return (cfdp_status_t)encoded;
-
-        rc = send_pdu(s, CFDP_PDU_FILE_DIRECTIVE, CFDP_DIR_TOWARD_RECEIVER,
-                      data_field, (uint16_t)encoded);
+        rc = do_send_metadata(s);
         if (rc != CFDP_OK) return rc;
-
-        printf("[SENDER2] Sent Metadata: '%s' → '%s', size=%u\n",
-               s->src_filename, s->dst_filename, s->file_size);
 
         s->state = CFDP2_SENDER_SEND_FILE_DATA;
         return CFDP_OK;
@@ -408,7 +424,17 @@ cfdp_status_t cfdp2_sender_step(cfdp2_sender_t *s)
                 s->state = CFDP2_SENDER_FINISHED;
                 return CFDP_OK;
             }
-            /* NAK received — buffer the gaps; wait for ACK(EOF) still. */
+            /* A NAK proves the receiver saw our EOF (its ACK was lost).
+               Don't burn EOF retries — go service the NAK. */
+            if (s->nak_gaps.count > 0 || s->metadata_requested) {
+                printf("[SENDER2] NAK implies EOF was received\n");
+                s->retransmit_gap_idx = 0;
+                s->retransmit_offset  = s->nak_gaps.count
+                                        ? s->nak_gaps.gaps[0].start : 0;
+                s->finished_wait_start = time(NULL);
+                s->state = CFDP2_SENDER_RETRANSMIT;
+                return CFDP_OK;
+            }
         }
 
         /* Check ACK timer */
@@ -449,10 +475,14 @@ cfdp_status_t cfdp2_sender_step(cfdp2_sender_t *s)
                 return CFDP_OK;
             }
 
+            /* Any PDU from the receiver means the link is alive */
+            s->finished_wait_start = time(NULL);
+
             /* If we got a NAK, switch to retransmit mode */
-            if (s->nak_gap_count > 0) {
-                s->retransmit_gap_idx  = 0;
-                s->retransmit_offset   = s->nak_gaps[0].start;
+            if (s->nak_gaps.count > 0 || s->metadata_requested) {
+                s->retransmit_gap_idx = 0;
+                s->retransmit_offset  = s->nak_gaps.count
+                                        ? s->nak_gaps.gaps[0].start : 0;
                 s->state = CFDP2_SENDER_RETRANSMIT;
                 return CFDP_OK;
             }
@@ -476,15 +506,22 @@ cfdp_status_t cfdp2_sender_step(cfdp2_sender_t *s)
          * We seek to retransmit_offset in the file and read segment_size
          * bytes (or until the gap end, whichever is smaller).
          */
-        if (s->retransmit_gap_idx >= s->nak_gap_count) {
+        if (s->metadata_requested) {
+            rc = do_send_metadata(s);
+            if (rc != CFDP_OK) return rc;
+            s->metadata_requested = false;
+            return CFDP_OK;
+        }
+
+        if (s->retransmit_gap_idx >= s->nak_gaps.count) {
             /* All gaps replayed — clear the list and wait again */
-            s->nak_gap_count = 0;
+            s->nak_gaps.count = 0;
             s->finished_wait_start = time(NULL);   /* reset inactivity timer */
             s->state = CFDP2_SENDER_AWAIT_FINISHED;
             return CFDP_OK;
         }
 
-        cfdp_nak_gap_t *gap = &s->nak_gaps[s->retransmit_gap_idx];
+        cfdp_nak_gap_t *gap = &s->nak_gaps.gaps[s->retransmit_gap_idx];
 
         /* Seek to the current retransmission offset */
         if (lseek(s->file_fd, (off_t)s->retransmit_offset, SEEK_SET) < 0) {
@@ -528,9 +565,9 @@ cfdp_status_t cfdp2_sender_step(cfdp2_sender_t *s)
         /* Advance to next gap when this one is fully covered */
         if (s->retransmit_offset >= gap->end) {
             s->retransmit_gap_idx++;
-            if (s->retransmit_gap_idx < s->nak_gap_count) {
+            if (s->retransmit_gap_idx < s->nak_gaps.count) {
                 s->retransmit_offset =
-                    s->nak_gaps[s->retransmit_gap_idx].start;
+                    s->nak_gaps.gaps[s->retransmit_gap_idx].start;
             }
         }
 
@@ -563,6 +600,7 @@ void cfdp2_sender_destroy(cfdp2_sender_t *s)
         close(s->file_fd);
         s->file_fd = -1;
     }
+    cfdp2_gap_list_free(&s->nak_gaps);
 }
 
 const char *cfdp2_sender_state_str(cfdp2_sender_state_t s)

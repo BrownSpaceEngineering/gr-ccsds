@@ -5,19 +5,32 @@
  *
  *   IDLE: cfdp2_receiver_init() -> AWAIT_METADATA
  *
- *   AWAIT_METADATA: ingest(Metadata PDU)
- *          alloc rx_buf, init gap_list={[0,file_size)} ->
+ *   AWAIT_METADATA:
+ *      ingest(Metadata PDU)
+ *          alloc rx_buf, gap_list={[0,file_size)} -> RECEIVING
+ *      ingest(File Data PDU)
+ *          no file size known yet: drop it, send NAK[0,0) asking for
+ *          Metadata (rate-limited) -> stay AWAIT_METADATA
+ *      ingest(EOF PDU)
+ *          EOF carries file_size + checksum, so we can set up the buffer
+ *          without Metadata: alloc rx_buf, gap_list={[0,file_size)},
+ *          send ACK(EOF) + NAK (incl. [0,0) Metadata request) -> AWAIT_DATA
+ *
  *   RECEIVING:
-        ingest(File Data PDU)
+ *      ingest(File Data PDU)
  *          update gap_list -> stay RECEIVING
  *      ingest(EOF PDU)
  *          send ACK(EOF) -> SEND_FINISHED (if no gaps)
  *          send ACK(EOF) + NAK -> AWAIT_DATA    (if gaps)
  *
  *   AWAIT_DATA:
-        ingest(File Data PDU)
- *          update gap_list
+ *      ingest(File Data PDU)
+ *          update gap_list, reset check retry counter
  *          gap_list empty? -> SEND_FINISHED
+ *      ingest(EOF PDU)             [our ACK(EOF) was lost]
+ *          resend ACK(EOF) -> stay AWAIT_DATA
+ *      ingest(Metadata PDU)        [late arrival after our request]
+ *          record filename -> stay AWAIT_DATA
  *      check timer expires with pending gaps
  *          retry < limit: resend NAK -> stay AWAIT_DATA
  *          retry >= limit -> CANCELLED
@@ -29,20 +42,22 @@
  *
  *   AWAIT_FINISHED_ACK
  *      ingest(ACK(Finished)) -> FINISHED
+ *      ingest(EOF PDU)             [sender never saw our ACK(EOF)]
+ *          resend ACK(EOF) + Finished -> stay
  *      timer expires, retry < limit
  *          resend Finished -> stay AWAIT_FINISHED_ACK
- *      timer expires, retry >= limit -> CANCELLED
+ *      timer expires, retry >= limit
+ *          file is complete and verified, so -> FINISHED (with warning)
  *
  *   FINISHED / CANCELLED — terminal
  *
  * Gap list design:
- *   We track missing byte ranges as a sorted array of {start, end} pairs.
- *   On receipt of a File Data PDU at [offset, offset+len) we punch that
- *   range out of the gap list.  The gap list shrinks toward empty as data
- *   arrives.  An empty gap list means the file is complete.
- *
- *   The gap list is at most CFDP_MAX_NAK_GAPS entries.  For CubeSat
- *   payloads (small files, small PDUs) this is always sufficient.
+ *   We track missing byte ranges as a sorted, growable array of
+ *   {start, end} pairs (cfdp2_gap_list_t, cfdp_class2_gaps.c).  On
+ *   receipt of a File Data PDU at [offset, offset+len) we punch that
+ *   range out of the gap list.  An empty gap list means the file is
+ *   complete.  The list is not bounded by CFDP_MAX_NAK_GAPS: that is a
+ *   per-PDU limit, and send_nak() emits as many NAK PDUs as needed.
  *
  * Timer model:
  *   We use time(NULL) for wall-clock elapsed time.  No threads are needed;
@@ -59,99 +74,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
-
-/* -----------------------------------------------------------------------
- * Gap list operations
- * ---------------------------------------------------------------------- */
-
-/*
- * Initialise the gap list to a single gap covering the entire file.
- * Call after receiving Metadata (when file_size is known).
- */
-static void gap_list_init(cfdp2_gap_list_t *gl, uint32_t file_size)
-{
-    if (file_size == 0) {
-        gl->count = 0;
-        return;
-    }
-    gl->gaps[0].start = 0;
-    gl->gaps[0].end   = file_size;
-    gl->count         = 1;
-}
-
-/*
- * Remove the byte range [recv_start, recv_end) from the gap list.
- *
- * For each existing gap G that overlaps [recv_start, recv_end):
- *   - If the received range covers all of G: remove G.
- *   - If the received range covers the left part of G: shrink G from left.
- *   - If the received range covers the right part of G: shrink G from right.
- *   - If the received range is entirely inside G: split G into two.
- *
- * We operate on the array in-place.  Splitting may increase count by 1;
- * all other operations reduce or preserve count.
- */
-static void gap_list_mark_received(cfdp2_gap_list_t *gl,
-                                   uint32_t recv_start,
-                                   uint32_t recv_end)
-{
-    for (uint32_t i = 0; i < gl->count; ) {
-        uint32_t gs = gl->gaps[i].start;
-        uint32_t ge = gl->gaps[i].end;
-
-        /* No overlap — skip */
-        if (recv_end <= gs || recv_start >= ge) {
-            i++;
-            continue;
-        }
-
-        bool trims_left  = recv_start <= gs;
-        bool trims_right = recv_end   >= ge;
-
-        if (trims_left && trims_right) {
-            /* Received data covers entire gap — remove gap i */
-            memmove(&gl->gaps[i], &gl->gaps[i + 1],
-                    (gl->count - i - 1) * sizeof(cfdp_nak_gap_t));
-            gl->count--;
-            /* Do not advance i; re-check same index */
-
-        } else if (trims_left) {
-            /* Received data covers left portion — shrink from left */
-            gl->gaps[i].start = recv_end;
-            i++;
-
-        } else if (trims_right) {
-            /* Received data covers right portion — shrink from right */
-            gl->gaps[i].end = recv_start;
-            i++;
-
-        } else {
-            /* Received data is entirely inside gap — split into two */
-            if (gl->count >= CFDP_MAX_NAK_GAPS) {
-                /*
-                 * Gap table full: we cannot split.  This means we will
-                 * eventually re-NAK the whole range and the sender will
-                 * retransmit more than strictly necessary — correctness
-                 * is preserved, just efficiency suffers.
-                 */
-                fprintf(stderr,
-                        "[RECV2] Gap list full — cannot split gap [%u,%u)\n",
-                        gs, ge);
-                i++;
-                continue;
-            }
-            /* Insert new right-hand gap after position i */
-            memmove(&gl->gaps[i + 2], &gl->gaps[i + 1],
-                    (gl->count - i - 1) * sizeof(cfdp_nak_gap_t));
-            gl->count++;
-
-            gl->gaps[i    ].end   = recv_start;   /* left remainder  */
-            gl->gaps[i + 1].start = recv_end;     /* right remainder */
-            gl->gaps[i + 1].end   = ge;
-            i += 2;
-        }
-    }
-}
 
 /* -----------------------------------------------------------------------
  * Internal: build and send a complete PDU toward the sender
@@ -218,21 +140,23 @@ static cfdp_status_t send_ack_eof(cfdp2_receiver_t *r)
 }
 
 /* -----------------------------------------------------------------------
- * Internal: send a NAK PDU listing all current gaps
+ * Internal: send one NAK PDU carrying the given gaps
  * ---------------------------------------------------------------------- */
 
-static cfdp_status_t send_nak(cfdp2_receiver_t *r)
+static cfdp_status_t send_one_nak(cfdp2_receiver_t *r,
+                                  const cfdp_nak_gap_t *gaps,
+                                  uint32_t gap_count,
+                                  uint32_t scope_start,
+                                  uint32_t scope_end)
 {
     uint8_t data_field[CFDP_MAX_PDU_SIZE];
 
     cfdp_nak_pdu_t nak = {
-        .scope_start = 0,
-        .scope_end   = r->expected_file_size,
-        .gap_count   = r->gap_list.count,
+        .scope_start = scope_start,
+        .scope_end   = scope_end,
+        .gap_count   = gap_count,
     };
-    for (uint32_t i = 0; i < r->gap_list.count; i++) {
-        nak.gaps[i] = r->gap_list.gaps[i];
-    }
+    memcpy(nak.gaps, gaps, gap_count * sizeof(cfdp_nak_gap_t));
 
     int encoded = cfdp2_encode_nak(&nak, data_field, sizeof(data_field));
     if (encoded < 0) return (cfdp_status_t)encoded;
@@ -241,21 +165,74 @@ static cfdp_status_t send_nak(cfdp2_receiver_t *r)
                                 data_field, (uint16_t)encoded);
     if (rc != CFDP_OK) return rc;
 
-    printf("[RECV2] Sent NAK: %u gap(s)\n", nak.gap_count);
-    for (uint32_t i = 0; i < nak.gap_count; i++) {
-        printf("[RECV2]   gap %u: [%u, %u)\n",
-               i, nak.gaps[i].start, nak.gaps[i].end);
-    }
+    printf("[RECV2] Sent NAK: %u gap(s), scope [%u, %u)\n",
+           gap_count, scope_start, scope_end);
     return CFDP_OK;
+}
+
+/*
+ * Send NAK PDU(s) covering every gap in the list, CFDP_MAX_NAK_GAPS per
+ * PDU.  If Metadata is still missing, the first PDU also carries the
+ * [0,0) "resend Metadata" request (CCSDS 727.0-B-5 4.6.4.3.3).
+ */
+static cfdp_status_t send_nak(cfdp2_receiver_t *r)
+{
+    cfdp_nak_gap_t  chunk[CFDP_MAX_NAK_GAPS];
+    uint32_t        total = r->gap_list.count;
+    uint32_t        i     = 0;
+    bool            want_metadata = !r->got_metadata;
+
+    printf("[RECV2] NAK round: %u gap(s) pending%s\n",
+           total, want_metadata ? " + Metadata request" : "");
+
+    do {
+        uint32_t n = 0;
+        if (want_metadata) {
+            chunk[n].start = 0;
+            chunk[n].end   = 0;
+            n++;
+            want_metadata = false;
+        }
+        while (i < total && n < CFDP_MAX_NAK_GAPS) {
+            chunk[n++] = r->gap_list.gaps[i++];
+        }
+
+        /* Scope = span of the real gaps in this PDU (0 if only Metadata) */
+        uint32_t scope_start = 0, scope_end = 0;
+        for (uint32_t k = 0; k < n; k++) {
+            if (chunk[k].end == 0) continue;
+            if (scope_end == 0 || chunk[k].start < scope_start)
+                scope_start = chunk[k].start;
+            if (chunk[k].end > scope_end) scope_end = chunk[k].end;
+        }
+
+        cfdp_status_t rc = send_one_nak(r, chunk, n, scope_start, scope_end);
+        if (rc != CFDP_OK) return rc;
+    } while (i < total);
+
+    return CFDP_OK;
+}
+
+/* Rate-limited "please resend Metadata" NAK while we have no file size. */
+static cfdp_status_t send_metadata_request(cfdp2_receiver_t *r)
+{
+    time_t now = time(NULL);
+    if (r->last_metadata_nak_time != 0 &&
+        now - r->last_metadata_nak_time < CFDP_METADATA_NAK_INTERVAL_S)
+        return CFDP_OK;
+    r->last_metadata_nak_time = now;
+
+    cfdp_nak_gap_t req = { .start = 0, .end = 0 };
+    return send_one_nak(r, &req, 1, 0, 0);
 }
 
 /* -----------------------------------------------------------------------
  * Internal: send Finished PDU and transition state
  * ---------------------------------------------------------------------- */
 
-static cfdp_status_t do_send_finished(cfdp2_receiver_t *r,
-                                      cfdp_condition_code_t cond,
-                                      cfdp_delivery_code_t delivery)
+static cfdp_status_t send_finished_pdu(cfdp2_receiver_t *r,
+                                       cfdp_condition_code_t cond,
+                                       cfdp_delivery_code_t delivery)
 {
     uint8_t data_field[8];
 
@@ -275,9 +252,18 @@ static cfdp_status_t do_send_finished(cfdp2_receiver_t *r,
     printf("[RECV2] Sent Finished: delivery=%s cond=%d\n",
            delivery == CFDP_DELIVERY_COMPLETE ? "COMPLETE" : "INCOMPLETE",
            (int)cond);
+    r->finished_sent_time = time(NULL);
+    return CFDP_OK;
+}
 
-    r->finished_sent_time    = time(NULL);
-    r->finished_retry_count  = 0;
+static cfdp_status_t do_send_finished(cfdp2_receiver_t *r,
+                                      cfdp_condition_code_t cond,
+                                      cfdp_delivery_code_t delivery)
+{
+    cfdp_status_t rc = send_finished_pdu(r, cond, delivery);
+    if (rc != CFDP_OK) return rc;
+
+    r->finished_retry_count = 0;
     r->state = CFDP2_RECV_AWAIT_FINISHED_ACK;
     return CFDP_OK;
 }
@@ -318,13 +304,34 @@ static cfdp_status_t finish_transfer(cfdp2_receiver_t *r)
 }
 
 /* -----------------------------------------------------------------------
+ * Internal: allocate the reassembly buffer once the file size is known
+ * (from Metadata or, failing that, from EOF).
+ * ---------------------------------------------------------------------- */
+
+static cfdp_status_t setup_reassembly(cfdp2_receiver_t *r, uint32_t file_size)
+{
+    r->expected_file_size = file_size;
+
+    if (file_size > 0) {
+        r->rx_buf.data = (uint8_t *)calloc(1, file_size);
+        if (!r->rx_buf.data) {
+            fprintf(stderr, "[RECV2] OOM allocating %u bytes\n", file_size);
+            return CFDP_ERR_IO;
+        }
+        r->rx_buf.capacity = file_size;
+    }
+
+    return cfdp2_gap_list_reset(&r->gap_list, file_size);
+}
+
+/* -----------------------------------------------------------------------
  * PDU dispatch handlers
  * ---------------------------------------------------------------------- */
 
 static cfdp_status_t handle_metadata(cfdp2_receiver_t *r,
                                      const uint8_t *data, uint16_t len)
 {
-    if (r->state != CFDP2_RECV_AWAIT_METADATA) {
+    if (r->got_metadata) {
         fprintf(stderr, "[RECV2] Duplicate Metadata PDU — ignored\n");
         return CFDP_OK;
     }
@@ -333,35 +340,42 @@ static cfdp_status_t handle_metadata(cfdp2_receiver_t *r,
     int rc = cfdp_decode_metadata(data, len, &meta);
     if (rc < 0) return (cfdp_status_t)rc;
 
-    r->expected_file_size = meta.file_size;
-    r->checksum_type      = meta.checksum_type;
+    r->checksum_type = meta.checksum_type;
     strncpy(r->dst_filename, meta.dst_filename, CFDP_MAX_FILENAME_LEN);
 
     printf("[RECV2] Got Metadata: src='%s' dst='%s' size=%u\n",
-           meta.src_filename, r->dst_filename, r->expected_file_size);
+           meta.src_filename, r->dst_filename, meta.file_size);
 
-    /* Allocate reassembly buffer */
-    if (meta.file_size > 0) {
-        r->rx_buf.data = (uint8_t *)calloc(1, meta.file_size);
-        if (!r->rx_buf.data) {
-            fprintf(stderr, "[RECV2] OOM allocating %u bytes\n",
-                    meta.file_size);
-            return CFDP_ERR_IO;
-        }
-        r->rx_buf.capacity = meta.file_size;
+    if (r->state == CFDP2_RECV_AWAIT_METADATA) {
+        cfdp_status_t src = setup_reassembly(r, meta.file_size);
+        if (src != CFDP_OK) return src;
+        r->state = CFDP2_RECV_RECEIVING;
+    } else if (meta.file_size != r->expected_file_size) {
+        /* Buffer was already set up from EOF; sizes must agree. */
+        fprintf(stderr,
+                "[RECV2] Metadata size %u != EOF size %u — CANCELLED\n",
+                meta.file_size, r->expected_file_size);
+        r->state = CFDP2_RECV_CANCELLED;
+        return CFDP_ERR_INVALID_PDU;
     }
 
-    /* Initialise gap list to cover the entire file */
-    gap_list_init(&r->gap_list, meta.file_size);
-
     r->got_metadata = true;
-    r->state        = CFDP2_RECV_RECEIVING;
+
+    /* Metadata was the last thing we were waiting on */
+    if (r->state == CFDP2_RECV_AWAIT_DATA && r->gap_list.count == 0) {
+        return finish_transfer(r);
+    }
     return CFDP_OK;
 }
 
 static cfdp_status_t handle_file_data(cfdp2_receiver_t *r,
                                       const uint8_t *data, uint16_t len)
 {
+    if (r->state == CFDP2_RECV_AWAIT_METADATA) {
+        /* No file size yet, so nowhere to put this.  Ask for Metadata. */
+        return send_metadata_request(r);
+    }
+
     if (r->state != CFDP2_RECV_RECEIVING &&
         r->state != CFDP2_RECV_AWAIT_DATA) {
         fprintf(stderr,
@@ -387,19 +401,23 @@ static cfdp_status_t handle_file_data(cfdp2_receiver_t *r,
     memcpy(r->rx_buf.data + fd.offset, fd.data, fd.data_len);
     r->rx_buf.received_bytes += fd.data_len;
 
-    /* Update gap list */
-    gap_list_mark_received(&r->gap_list,
-                           fd.offset,
-                           fd.offset + fd.data_len);
+    /* Update gap list.  On OOM the gap simply stays recorded as missing,
+       which costs a redundant retransmission but never loses data. */
+    (void)cfdp2_gap_list_mark_received(&r->gap_list,
+                                       fd.offset,
+                                       fd.offset + fd.data_len);
 
     printf("[RECV2] Got File Data: offset=%-6u len=%-4u  "
            "gaps=%u\n",
            fd.offset, fd.data_len, r->gap_list.count);
 
-    /* If we're in AWAIT_DATA and the gap list just became empty,
-       move straight to sending Finished (no need to wait for more). */
-    if (r->state == CFDP2_RECV_AWAIT_DATA && r->gap_list.count == 0) {
-        return finish_transfer(r);
+    if (r->state == CFDP2_RECV_AWAIT_DATA) {
+        /* Progress: the link is alive, so give the sender fresh retries */
+        r->check_retry_count = 0;
+
+        if (r->gap_list.count == 0 && r->got_metadata) {
+            return finish_transfer(r);
+        }
     }
 
     return CFDP_OK;
@@ -408,21 +426,33 @@ static cfdp_status_t handle_file_data(cfdp2_receiver_t *r,
 static cfdp_status_t handle_eof(cfdp2_receiver_t *r,
                                 const uint8_t *data, uint16_t len)
 {
-    if (r->state != CFDP2_RECV_RECEIVING) {
+    cfdp_eof_pdu_t eof;
+    int rc = cfdp_decode_eof(data, len, &eof);
+    if (rc < 0) return (cfdp_status_t)rc;
+
+    /* Duplicate EOF: the sender didn't see our ACK(EOF).  Re-ACK, and
+       if we've already finished, re-send Finished too. */
+    if (r->got_eof) {
+        printf("[RECV2] Duplicate EOF — re-sending ACK(EOF)\n");
+        cfdp_status_t arc = send_ack_eof(r);
+        if (arc != CFDP_OK) return arc;
+        if (r->state == CFDP2_RECV_AWAIT_FINISHED_ACK) {
+            return send_finished_pdu(r, CFDP_COND_NO_ERROR,
+                                     CFDP_DELIVERY_COMPLETE);
+        }
+        return CFDP_OK;
+    }
+
+    if (r->state != CFDP2_RECV_AWAIT_METADATA &&
+        r->state != CFDP2_RECV_RECEIVING) {
         fprintf(stderr,
                 "[RECV2] EOF PDU in unexpected state %d — ignored\n",
                 r->state);
         return CFDP_OK;
     }
 
-    cfdp_eof_pdu_t eof;
-    int rc = cfdp_decode_eof(data, len, &eof);
-    if (rc < 0) return (cfdp_status_t)rc;
-
     printf("[RECV2] Got EOF: cond=%d checksum=0x%08X size=%u\n",
            (int)eof.condition_code, eof.checksum, eof.file_size);
-
-    r->expected_checksum = eof.checksum;
 
     /* Sender-side cancellation: eof.condition_code != NO_ERROR */
     if (eof.condition_code != CFDP_COND_NO_ERROR) {
@@ -433,16 +463,32 @@ static cfdp_status_t handle_eof(cfdp2_receiver_t *r,
         return CFDP_ERR_STATE;
     }
 
+    /* Metadata never arrived: EOF tells us the size, so set up now. */
+    if (r->state == CFDP2_RECV_AWAIT_METADATA) {
+        printf("[RECV2] EOF before Metadata — setting up from EOF size\n");
+        cfdp_status_t src = setup_reassembly(r, eof.file_size);
+        if (src != CFDP_OK) return src;
+    } else if (eof.file_size != r->expected_file_size) {
+        fprintf(stderr,
+                "[RECV2] EOF size %u != Metadata size %u — CANCELLED\n",
+                eof.file_size, r->expected_file_size);
+        r->state = CFDP2_RECV_CANCELLED;
+        return CFDP_ERR_INVALID_PDU;
+    }
+
+    r->expected_checksum = eof.checksum;
+    r->got_eof           = true;
+
     /* Always send ACK(EOF) first */
     cfdp_status_t arc = send_ack_eof(r);
     if (arc != CFDP_OK) return arc;
 
-    if (r->gap_list.count == 0) {
+    if (r->gap_list.count == 0 && r->got_metadata) {
         /* No missing data — go straight to Finished */
         return finish_transfer(r);
     }
 
-    /* Missing segments — send NAK and wait for retransmissions */
+    /* Missing segments (and/or Metadata) — NAK and wait */
     arc = send_nak(r);
     if (arc != CFDP_OK) return arc;
 
@@ -479,7 +525,7 @@ cfdp_status_t cfdp2_receiver_init(cfdp2_receiver_t *r,
     r->entity_id_len  = entity_id_len;
     r->seq_num_len    = seq_num_len;
     r->transport      = transport;
-    return CFDP_OK;
+    return cfdp2_gap_list_init(&r->gap_list);
 }
 
 cfdp_status_t cfdp2_receiver_ingest(cfdp2_receiver_t *r,
@@ -492,10 +538,11 @@ cfdp_status_t cfdp2_receiver_ingest(cfdp2_receiver_t *r,
     int hdr_len = cfdp_decode_header(pdu_buf, pdu_len, &hdr);
     if (hdr_len < 0) return (cfdp_status_t)hdr_len;
 
-    /* Latch transaction identity on the first PDU */
-    if (!r->got_metadata) {
+    /* Latch transaction identity on the first PDU of any kind */
+    if (!r->tx_latched) {
         r->source_entity_id = hdr.source_entity_id;
         r->seq_num          = hdr.transaction_seq_num;
+        r->tx_latched       = true;
     } else {
         if (hdr.source_entity_id    != r->source_entity_id ||
             hdr.transaction_seq_num != r->seq_num) {
@@ -559,13 +606,14 @@ cfdp_status_t cfdp2_receiver_run(cfdp2_receiver_t *r)
             if (elapsed >= CFDP_CHECK_TIMEOUT_S) {
                 if (r->check_retry_count >= CFDP_CHECK_RETRY_LIMIT) {
                     fprintf(stderr,
-                            "[RECV2] Check timer limit reached — CANCELLED\n");
+                            "[RECV2] No data for %d NAK rounds — CANCELLED\n",
+                            CFDP_CHECK_RETRY_LIMIT);
                     r->state = CFDP2_RECV_CANCELLED;
                     break;
                 }
                 fprintf(stderr,
                         "[RECV2] Check timer expired — resending NAK "
-                        "(retry %d/%d)\n",
+                        "(silent round %d/%d)\n",
                         r->check_retry_count + 1, CFDP_CHECK_RETRY_LIMIT);
                 r->check_retry_count++;
                 cfdp_status_t rc = send_nak(r);
@@ -578,9 +626,16 @@ cfdp_status_t cfdp2_receiver_run(cfdp2_receiver_t *r)
             time_t elapsed = time(NULL) - r->finished_sent_time;
             if (elapsed >= CFDP_ACK_TIMEOUT_S) {
                 if (r->finished_retry_count >= CFDP_ACK_RETRY_LIMIT) {
+                    /*
+                     * The file is complete and checksum-verified; only the
+                     * closing handshake is unconfirmed.  Keep the file
+                     * rather than throwing away a good transfer.
+                     */
                     fprintf(stderr,
-                            "[RECV2] Finished ACK timeout — CANCELLED\n");
-                    r->state = CFDP2_RECV_CANCELLED;
+                            "[RECV2] No ACK(Finished) after %d retries — "
+                            "closing transaction anyway (file complete)\n",
+                            CFDP_ACK_RETRY_LIMIT);
+                    r->state = CFDP2_RECV_FINISHED;
                     break;
                 }
                 fprintf(stderr,
@@ -589,22 +644,9 @@ cfdp_status_t cfdp2_receiver_run(cfdp2_receiver_t *r)
                         r->finished_retry_count + 1, CFDP_ACK_RETRY_LIMIT);
                 r->finished_retry_count++;
 
-                /*
-                 * Rebuild and resend the Finished PDU.  We resend with
-                 * COMPLETE/NO_ERROR because we already verified the
-                 * checksum before entering AWAIT_FINISHED_ACK.
-                 */
-                uint8_t df[8];
-                cfdp_finished_pdu_t fin = {
-                    .condition_code = CFDP_COND_NO_ERROR,
-                    .delivery_code  = CFDP_DELIVERY_COMPLETE,
-                    .file_status    = CFDP_FILESTATUS_RETAINED,
-                };
-                int enc = cfdp2_encode_finished(&fin, df, sizeof(df));
-                if (enc > 0) {
-                    send_pdu(r, CFDP_PDU_FILE_DIRECTIVE, df, (uint16_t)enc);
-                }
-                r->finished_sent_time = time(NULL);
+                /* We only reach this state after a good checksum. */
+                (void)send_finished_pdu(r, CFDP_COND_NO_ERROR,
+                                        CFDP_DELIVERY_COMPLETE);
             }
         }
 
@@ -658,6 +700,7 @@ void cfdp2_receiver_destroy(cfdp2_receiver_t *r)
     free(r->rx_buf.data);
     r->rx_buf.data     = NULL;
     r->rx_buf.capacity = 0;
+    cfdp2_gap_list_free(&r->gap_list);
 }
 
 const char *cfdp2_recv_state_str(cfdp2_recv_state_t s)

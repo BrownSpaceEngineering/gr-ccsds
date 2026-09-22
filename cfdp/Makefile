@@ -19,6 +19,7 @@ SRC = src/cfdp_pdu.c \
       src/cfdp_transport_udp.c \
       src/cfdp_util.c \
 	  src/cfdp_class2_pdu.c \
+	  src/cfdp_class2_gaps.c \
 	  src/cfdp_class2_sender.c \
 	  src/cfdp_class2_receiver.c
 
