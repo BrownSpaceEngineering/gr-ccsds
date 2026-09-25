@@ -23,14 +23,14 @@ SRC = src/cfdp_pdu.c \
 	  src/cfdp_class2_sender.c \
 	  src/cfdp_class2_receiver.c
 
-OBJ = $(SRC:.c=.o)
+OBJ = $(patsubst src/%.c,build/%.o,$(SRC))
 
 .PHONY: all test loopback clean
 
 all: bin/test_pdu bin/test_sender bin/test_receiver bin/test_sender2 bin/test_receiver2
 
-bin:
-	mkdir -p bin
+bin build:
+	mkdir -p $@
 
 bin/test_pdu: $(OBJ) test/test_pdu.c | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJ) test/test_pdu.c $(LDFLAGS)
@@ -47,7 +47,7 @@ bin/test_sender2: $(OBJ) test/test_sender2.c | bin
 bin/test_receiver2: $(OBJ) test/test_receiver2.c | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJ) test/test_receiver2.c $(LDFLAGS)
 
-%.o: %.c
+build/%.o: src/%.c | build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Run unit tests
@@ -102,6 +102,6 @@ loopback2: all
 	fi
 
 clean:
-	rm -f $(OBJ) bin/test_pdu bin/test_sender bin/test_receiver bin/test_sender2 bin/test_receiver2
+	rm -rf build bin
+	rm -f $(SRC:.c=.o)
 	rm -f received_file.bin
-	rmdir bin 2>/dev/null || true
