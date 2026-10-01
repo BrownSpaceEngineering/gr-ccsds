@@ -1,7 +1,9 @@
 #pragma once
 
 #include "binary_reader.h"
+#include "binary_writer.h"
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -46,7 +48,7 @@ public:
 
   SpacePacketPrimaryHeader(BinaryReader &reader);
 
-  std::vector<uint8_t> to_bytes();
+  void write(BinaryWriter &writer);
 };
 
 class SpacePacketSecondaryHeader {
@@ -58,7 +60,7 @@ public:
 
   SpacePacketSecondaryHeader(BinaryReader &reader);
 
-  std::vector<uint8_t> to_bytes();
+  void write(BinaryWriter &writer);
 };
 
 class SpacePacket {
@@ -66,9 +68,11 @@ public:
   SpacePacketPrimaryHeader primary_header;
 
   // Optional
-  SpacePacketSecondaryHeader secondary_header;
+  std::optional<SpacePacketSecondaryHeader> secondary_header;
 
-  std::vector<char> data;
+  std::vector<uint8_t> data;
+
+  SpacePacket() {}
 
   SpacePacket(const std::vector<uint8_t> &bytes);
 

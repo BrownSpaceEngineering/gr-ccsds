@@ -7,6 +7,6 @@ void BinaryWriter::write_u16(uint16_t num) {
   uint8_t high = num >> 8;
   uint8_t low = num & 0xFF;
 
-  write_u8(low);
   write_u8(high);
+  write_u8(low);
 }

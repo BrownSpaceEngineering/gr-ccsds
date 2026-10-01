@@ -1,12 +1,13 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 class BinaryReader {
 private:
   const std::vector<uint8_t> &data;
-  int pos = 0;
+  std::size_t pos = 0;
 
 public:
   BinaryReader(const std::vector<uint8_t> &data) : data(data) {}
