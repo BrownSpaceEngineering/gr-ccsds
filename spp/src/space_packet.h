@@ -17,7 +17,7 @@ enum PacketType : uint8_t {
 class SpacePacketPrimaryHeader {
 public:
   // Note(rks): If we end up being very memory constrained these can be packed
-  // into 2 bytes see
+  // into 2 bytes see above
   uint8_t packet_version_number;
   PacketType packet_type;
   bool secondary_header_flag;
