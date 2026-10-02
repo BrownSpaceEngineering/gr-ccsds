@@ -55,7 +55,7 @@ SpacePacket::SpacePacket(const std::vector<uint8_t> &bytes) {
     this->secondary_header = std::nullopt;
   }
 
-  for (int i = 0; i < this->primary_header.packet_data_length; i++) {
+  for (int i = 0; i < this->primary_header.packet_data_length + 1; i++) {
     data.push_back(reader.read_u8());
   }
 }

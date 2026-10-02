@@ -42,6 +42,7 @@ public:
   uint16_t packet_sequence;
 
   // Length for data segment of packet
+  // NOTE: this should be <number_of_bytes> - 1, see SPP Blue Book 4.1.3.5.3
   uint16_t packet_data_length;
 
   SpacePacketPrimaryHeader() {}

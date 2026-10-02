@@ -29,8 +29,9 @@ bool test_binary_io() {
 
 // Port of spp-rs::space_packet::tests::test_parse_space_packet.
 bool test_parse_space_packet() {
+  // The length field is the two-byte Packet Data Field length minus one.
   const std::vector<uint8_t> bytes{0xF1, 0x23, 0xDF, 0xFF,
-                                   0x00, 0x02, 0xDE, 0xAD};
+                                   0x00, 0x01, 0xDE, 0xAD};
   const SpacePacket packet(bytes);
   const auto &header = packet.primary_header;
 
@@ -42,7 +43,7 @@ bool test_parse_space_packet() {
       check(header.application_process_id == 0x123, "Incorrect application ID");
   ok &= check(header.sequence_flag == 3, "Incorrect sequence flag");
   ok &= check(header.packet_sequence == 0x1FFF, "Incorrect packet sequence");
-  ok &= check(header.packet_data_length == 2, "Incorrect packet data length");
+  ok &= check(header.packet_data_length == 1, "Incorrect packet data length");
   ok &= check(!packet.secondary_header, "Unexpected secondary header");
   ok &= check(packet.data == std::vector<uint8_t>{0xDE, 0xAD},
               "Incorrect packet data");
@@ -58,13 +59,13 @@ bool test_space_packet_roundtrip() {
   packet.primary_header.application_process_id = 0x2A;
   packet.primary_header.sequence_flag = 2;
   packet.primary_header.packet_sequence = 0x1234;
-  packet.primary_header.packet_data_length = 3;
+  packet.primary_header.packet_data_length = 2; // Three data bytes minus one.
   packet.secondary_header.emplace();
   packet.data = {0x01, 0x02, 0x03};
 
   const auto bytes = packet.to_bytes();
   bool ok = check(bytes == std::vector<uint8_t>{0x28, 0x2A, 0x92, 0x34, 0x00,
-                                                0x03, 0x01, 0x02, 0x03},
+                                                0x02, 0x01, 0x02, 0x03},
                   "Incorrect serialized packet bytes");
   const SpacePacket parsed(bytes);
   const auto &header = parsed.primary_header;
