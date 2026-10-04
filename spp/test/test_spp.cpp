@@ -1,5 +1,5 @@
-#include "binary_reader.h"
-#include "binary_writer.h"
+#include "common/binary_reader.h"
+#include "common/binary_writer.h"
 #include "space_packet.h"
 
 #include <cstdint>

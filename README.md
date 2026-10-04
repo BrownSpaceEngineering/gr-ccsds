@@ -22,6 +22,7 @@ and file uses within the directory.
 
 ### Directory Structure
 
+- `common/` - Shared C++ code used by `spp/` and `cfdp/`.
 - `USLP/` - Unified Space Link Protocol, used as the data-layer protocol for PVDX
 - `cfdp/` - CCSDS File Delivery Protocol, transport protocol primarily for images sent by PVDX.
 - `spp/` - Space Packet Protocol, packetization protocol used by PVDX
