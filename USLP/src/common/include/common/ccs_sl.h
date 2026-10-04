@@ -30,6 +30,22 @@ public:
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
     void PseudoRandomize(uint8_t* data, size_t length);
 private:
+
+
+    std::vector<uint8_t> Decode(const uint8_t* coded, size_t length);
+    void AddCompareSelect(uint8_t rxSymbols);
+    static const uint8_t CONV_STATES = 64; // 2^(K-1), number of possible states for symbol
+    static const uint8_t TRACEBACK_DEPTH = 64; //not sure what depth exactly
+    // --- State variables for Viterbi decoding ---
+    std::array<std::array<uint8_t, 2>, CONV_STATES> m_expected{}; // [state][input bit] -> (c1 << 1) | c2
+    std::array<uint32_t, CONV_STATES> m_pathMetric{};             // Running cost of the best path into each state
+    std::array<uint64_t, TRACEBACK_DEPTH> m_survivors{};          // Ring buffer, one decision bit per state per step
+    size_t m_decodeSteps = 0;
+    size_t m_bitsEmitted = 0;
+    uint8_t m_bestState = 0;
+    uint8_t m_outByte = 0;
+    uint8_t m_outBitCount = 0;
+
     std::vector<uint8_t> ExecutePipeline(uint8_t* physicalData, size_t physicalLength);
 
     CCS_SLConfig m_config;
