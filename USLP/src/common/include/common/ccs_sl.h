@@ -35,6 +35,10 @@ private:
     std::vector<uint8_t> Decode(const uint8_t* coded, size_t length);
     void AddCompareSelect(uint8_t rxSymbols);
     static const uint8_t CONV_STATES = 64; // 2^(K-1), number of possible states for symbol
+
+    std::array<std::array<uint8_t, 2>, CONV_STATES> m_expected{}; //lookup table for possible states for n+1 symbol
+    static uint8_t ConvOutputs(uint8_t state, uint8_t inputBit); //setup for lookup table
+    
     static const uint8_t TRACEBACK_DEPTH = 64; //not sure what depth exactly
     // --- State variables for Viterbi decoding ---
     std::array<std::array<uint8_t, 2>, CONV_STATES> m_expected{}; // [state][input bit] -> (c1 << 1) | c2
