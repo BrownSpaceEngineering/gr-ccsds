@@ -401,3 +401,33 @@ void RunUslpTemporalStandardsTest() {
     //std::cout << "[TEST PASSED] All USLP Temporal Standards Verified Successfully!\n";
     //std::cout << "==================================================\n\n";
 }
+
+void RunConvolutionalRoundTripTest() {
+    CCS_SLConfig ccs_slConfig;
+    CCS_SL transmitter(ccs_slConfig);
+    CCS_SL receiver(ccs_slConfig);
+    std::mt19937 gen(12345);
+    std::uniform_int_distribution<int> dist(0, 255);
+    std::vector<uint8_t> input(MAX_TRANSFER_FRAME_LENGTH);
+
+    for (auto& b: input) {
+        b = static_cast<uint8_t>(dist(gen));
+    }
+    std::vector<uint8_t> coded = transmitter.Encode(input.data(), input.size());
+    size_t totalCodedBits = coded.size() * 8;
+    std::uniform_int_distribution<size_t> bitDist(0, totalCodedBits - 1);
+
+    for (size_t i = 0; i < totalCodedBits / 100; ++i) {
+        size_t pos = bitDist(gen);
+        coded[pos / 8] ^= static_cast<uint8_t>(0x80 >> (pos % 8));
+    }
+    std::vector<uint8_t> output = receiver.Decode(coded.data(), coded.size());
+    std::vector<uint8_t> tail = receiver.FlushDecoder();
+    output.insert(output.end(), tail.begin(), tail.end());
+    if (output == input) {
+        std::cout << "[SUCCESS] Viterbi decoder recovered all " << input.size() << " bytes!" << std::endl;
+    } else {
+        std::cerr << "[ERROR] Viterbi decoder output does not match input (" 
+                  << output.size() << " bytes out, " << input.size() << " bytes in).\n";
+    }
+}

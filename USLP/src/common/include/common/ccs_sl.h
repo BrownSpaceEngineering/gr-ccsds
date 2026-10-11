@@ -31,12 +31,12 @@ public:
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
     void PseudoRandomize(uint8_t* data, size_t length);
     std::vector<uint8_t> Decode(const uint8_t* coded, size_t length);
+    std::vector<uint8_t> FlushDecoder();
 
 private:
     void AddCompareSelect(uint8_t rxSymbols);
     void AppendBit(uint8_t bit, std::vector<uint8_t>& out);
     void ResetDecoder();
-    std::vector<uint8_t> FlushDecoder();
 
     static const uint8_t CONV_STATES = 64; // 2^(K-1), number of possible states for symbol
 

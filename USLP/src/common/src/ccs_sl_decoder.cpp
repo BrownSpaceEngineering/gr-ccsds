@@ -48,8 +48,8 @@ std::vector<uint8_t> CCS_SL::Decode(const uint8_t* coded, size_t length) {
                 for (size_t k = newest; k > newest - TRACEBACK_DEPTH; k--) { //goes back TRACEBACK_DEPTH bits 
                     state = PrevState(state, m_survivors[k % TRACEBACK_DEPTH]); //uses the list of survivors to check previous state
                 }
-            AppendBit(state >> 5, decoded); // Input bit that entered this state
-            m_bitsEmitted++;
+                AppendBit(state >> 5, decoded); // Input bit that entered this state
+                m_bitsEmitted++;
             }
         }
         
