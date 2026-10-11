@@ -2,7 +2,12 @@
 #include <iostream>
 
 // Constructor implementation
-CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {}
+CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {
+    for (uint8_t state = 0; state < CONV_STATES; ++state) { // Precompute the expected coded symbols for every trellis branch
+        m_expected[state][0] = ConvOutputs(state, 0);
+        m_expected[state][1] = ConvOutputs(state, 1);
+    }
+}
 
 // Coordinates the physical layer execution sequence and returns the finished data
 std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physicalLength) {

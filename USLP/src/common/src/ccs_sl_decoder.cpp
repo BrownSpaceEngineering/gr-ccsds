@@ -11,14 +11,6 @@ uint8_t CCS_SL::ConvOutputs(uint8_t state, uint8_t inputBit) {
     return static_cast<uint8_t>((c1 << 1) | (c2 ^ 1)); // Invert c2 per CCSDS
 }
 
-// Precompute the expected coded symbols for every trellis branch
-CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {
-    for (uint8_t state = 0; state < CONV_STATES; ++state) {
-        m_expected[state][0] = ConvOutputs(state, 0);
-        m_expected[state][1] = ConvOutputs(state, 1);
-    }
-}
-
 void CCS_SL::AppendBit(uint8_t bit, std::vector<uint8_t>& out) {
     m_outByte = static_cast<uint8_t>((m_outByte << 1) | bit);
     if (++m_outBitCount == 8) {
