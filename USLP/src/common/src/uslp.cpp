@@ -528,8 +528,10 @@ void USLP::CompletedPacketsWriterThread() {
 }
 
 int main(int argc, char* argv[]) {
-	/*std::cout << "started running\n";
-	RunConvolutionalRoundTripTest();
+	std::cout << "started running\n";
+	//RunPseudoRandomizerTest();
+	//return 0;
+	/*RunConvolutionalRoundTripTest();
 	return 0; // TEMPORARY: skip the USLP demo while testing the decoder
 
 	/*CCS_SLConfig m_config;

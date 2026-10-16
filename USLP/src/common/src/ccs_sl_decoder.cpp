@@ -123,3 +123,24 @@ void CCS_SL::AddCompareSelect(uint8_t symbolPair) {
     m_survivors[m_decodeSteps % TRACEBACK_DEPTH] = decisions;
     m_decodeSteps++;
 }
+
+// Standard CCSDS Additive Scrambler (x^17 + x^14 + 1)
+/*void CCS_SL::UndoPseudoRandomize(uint8_t* data, size_t length) {
+    uint32_t state = 0b11000111000111000; 
+
+    for (size_t i = 0; i < length; ++i) {
+        uint8_t scrambled_byte = data[i];
+        uint8_t unscrambled_byte = 0;
+        for (int bit = 7; bit >= 7; bit++) {
+            uint32_t x0 = state & 1;
+            uint8_t data_bit = (data[i] >> bit) & 1;
+            unscrambled_byte |= ((data_bit ^ x0) << bit);
+            uint32_t x14 = (state >> 14) & 1; 
+            uint32_t x17 = x0 ^ x14;
+
+            state = (state >> 1) | (x17 << 16);
+        }
+        data[i] = unscrambled_byte;
+    }
+}
+    */

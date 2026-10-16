@@ -32,6 +32,7 @@ public:
     void PseudoRandomize(uint8_t* data, size_t length);
     std::vector<uint8_t> Decode(const uint8_t* coded, size_t length);
     std::vector<uint8_t> FlushDecoder();
+    void UndoPseudoRandomize(uint8_t* data, size_t length);
 
 private:
     void AddCompareSelect(uint8_t rxSymbols);
