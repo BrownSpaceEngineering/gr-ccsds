@@ -57,7 +57,7 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	tfph.TFLength = MAX_TRANSFER_FRAME_LENGTH - 1; // Could be variable, current model transmits fixed frames (in octets) (-1 since spec says one less than actual size)
 	tfph.bypassSequenceControlFlag = 1; // Expedited Frame, no COP
 	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
-	tfph.spare = 0b00; //Decide what to do with this later
+	tfph.spare = 0b00; // Decide what to do with this later
 	tfph.operationalControlFieldFlag = 0; // No OCF because no COP
 	log("GetPrimaryHeader");
 	log(static_cast<uint32_t>(VCID));

@@ -93,6 +93,6 @@ std::vector<uint8_t> CCS_SL::Encode(const uint8_t* data, size_t length) {
     cout << endl;
     */
 
-    // Forward the fully encoded stream to your GNU Radio physical interface
+    // Forward the fully encoded stream to GNU Radio physical interface
     return encoded;
 }
