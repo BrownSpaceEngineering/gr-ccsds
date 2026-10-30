@@ -6,6 +6,7 @@
 #include <iostream>
 #include <common/data.h>
 #include <common/uslpstructs.h>
+#include <bit>
 
 class CCS_SL {
 public:
@@ -29,7 +30,32 @@ public:
 
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
     void PseudoRandomize(uint8_t* data, size_t length);
+    std::vector<uint8_t> Decode(const uint8_t* coded, size_t length);
+    std::vector<uint8_t> FlushDecoder();
+    void UndoPseudoRandomize(uint8_t* data, size_t length);
+
 private:
+    void AddCompareSelect(uint8_t rxSymbols);
+    void AppendBit(uint8_t bit, std::vector<uint8_t>& out);
+    void ResetDecoder();
+
+    static const uint8_t CONV_STATES = 64; // 2^(K-1), number of possible states for symbol
+
+    static uint8_t ConvOutputs(uint8_t state, uint8_t inputBit); //setup for lookup table
+    static uint8_t PrevState(uint8_t state, uint64_t decisions);
+    
+
+    static const uint8_t TRACEBACK_DEPTH = 64; //not sure what depth exactly
+    // --- State variables for Viterbi decoding ---
+    std::array<std::array<uint8_t, 2>, CONV_STATES> m_expected{}; //lookup table for possible states for n+1 symbol
+    std::array<uint32_t, CONV_STATES> m_pathMetric{};             // Running cost of the best path into each state
+    std::array<uint64_t, TRACEBACK_DEPTH> m_survivors{};          // Ring buffer, one decision bit per state per step
+    size_t m_decodeSteps = 0;
+    size_t m_bitsEmitted = 0;
+    uint8_t m_bestState = 0;
+    uint8_t m_outByte = 0;
+    uint8_t m_outBitCount = 0;
+
     std::vector<uint8_t> ExecutePipeline(uint8_t* physicalData, size_t physicalLength);
 
     CCS_SLConfig m_config;

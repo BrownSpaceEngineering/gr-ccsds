@@ -16,4 +16,6 @@ struct PacketInjectionRecord {
 
 void RunVCPRequestMultiplexingTest(USLP& uslpStack, PacketTransmissionTracker& txTracker);
 void RunUslpTemporalStandardsTest();
+void RunConvolutionalRoundTripTest();
+void RunPseudoRandomizerTest();
 BitBuffer<MAX_MESSAGE_LENGTH> CreateDummyPacket(uint8_t fillByte, size_t numBytes);
