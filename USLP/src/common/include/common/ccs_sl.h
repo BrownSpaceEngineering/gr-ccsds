@@ -24,8 +24,18 @@ public:
         physicalFrame.insertAtEnd(CCSDS_ASM, 4);
         physicalFrame.insertAtEnd(logicalFrame.data.data(), logicalFrame.length);
 
-        // 2. Delegate the physical layer execution and return the resulting vector
-        return ExecutePipeline(physicalFrame.data.data(), physicalFrame.length);
+        // 2. Delegate the physical layer execution
+        std::vector<uint8_t> physicalBytes = ExecutePipeline(physicalFrame.data.data(), physicalFrame.length);
+
+        // 3. Prepend the one-time acquisition preamble ahead of the first frame only.
+        // It sits outside the randomizer and the encoder so the demodulator sees raw
+        // alternating bits while its AGC and symbol timing loop pull in.
+        if (!m_preambleSent) {
+            physicalBytes.insert(physicalBytes.begin(), PREAMBLE_LENGTH, PREAMBLE_BYTE);
+            m_preambleSent = true;
+        }
+
+        return physicalBytes;
     }
 
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
@@ -60,6 +70,11 @@ private:
 
     CCS_SLConfig m_config;
     const uint8_t CCSDS_ASM[4] = {0x1A, 0xCF, 0xFC, 0x1D};
+
+    // Acquisition preamble: 0xAA repeated, emitted ahead of the first frame and never again
+    static constexpr uint8_t PREAMBLE_BYTE = 0xAA;
+    static constexpr size_t PREAMBLE_LENGTH = 4;
+    bool m_preambleSent = false;
     
     // --- State variables for convolutional encoding ---
     uint8_t convState = 0; 

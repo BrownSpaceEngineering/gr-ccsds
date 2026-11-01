@@ -12,8 +12,14 @@ CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {
 // Coordinates the physical layer execution sequence and returns the finished data
 std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physicalLength) {
     // 1. Pseudorandomisation (scrambling)
+    std::cout << "\n";
+    std::cout << "\n";
+    std::cout << "executing ccssl\n";
+    std::cout << "\n";
+    std::cout << "\n";
     switch (m_config.selectedOptions.randomizer) {
         case CCS_SLConfig::Randomizer::LONG:
+            std::cout << "picked randomizer\n";
             PseudoRandomize(physicalData, physicalLength);
             break;
         case CCS_SLConfig::Randomizer::NONE:

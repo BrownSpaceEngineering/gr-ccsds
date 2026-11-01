@@ -136,7 +136,7 @@ struct CCS_SLConfig {
     struct SelectedOptions {
         // TEMPORARY: physical layer bypassed so raw (ASM + transfer frame) bytes reach GNU Radio
         // while the QPSK demodulator is brought up. Restore to LONG / CONVOLUTIONAL afterwards.
-        Randomizer randomizer = Randomizer::NONE;        // Normally LONG
+        Randomizer randomizer = Randomizer::LONG;        // Normally LONG
         CodingMethod codingMethod = CodingMethod::NONE;  // Normally CONVOLUTIONAL on satellite, None on ground
     };
 
