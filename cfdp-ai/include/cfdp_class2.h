@@ -1,5 +1,4 @@
-#ifndef CFDP_CLASS2_H
-#define CFDP_CLASS2_H
+#pragma once
 
 /*
  * cfdp_class2.h — Class 2 (Acknowledged) CFDP extensions
@@ -402,4 +401,3 @@ void cfdp2_receiver_destroy(cfdp2_receiver_t *r);
 
 const char *cfdp2_recv_state_str(cfdp2_recv_state_t s);
 
-#endif /* CFDP_CLASS2_H */

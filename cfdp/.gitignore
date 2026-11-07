@@ -1,0 +1,5 @@
+/build/
+/bin/
+/src/*.o
+/received_file.bin
+/docs/
