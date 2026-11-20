@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/binary_reader.h"
-#include "common/binary_writer.h"
+#include "binary_reader.h"
+#include "binary_writer.h"
 #include <cstdint>
 #include <optional>
 #include <span>
