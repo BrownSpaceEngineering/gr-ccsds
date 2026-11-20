@@ -91,7 +91,7 @@ struct Config {
   uint64_t entity_id = 0;
   uint8_t id_width = 4;
   uint8_t sequence_width = 1;
-  size_t max_file_size = 64 * 1024 * 1024;
+  size_t max_file_size = 8192;
   PeerConfig default_peer = {};
   std::map<Condition_Code, Fault_Handler> default_fault_handlers = {};
   std::map<uint64_t, PeerConfig> peers = {};

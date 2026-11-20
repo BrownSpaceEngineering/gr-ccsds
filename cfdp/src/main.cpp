@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
       if (!file)
         throw std::runtime_error("cannot open source file");
       if (std::filesystem::file_size(argv[5]) > Config{}.max_file_size)
-        throw std::length_error("source file exceeds 64 MiB example limit");
+        throw std::length_error("source file exceeds 8192-byte limit");
       Bytes data((std::istreambuf_iterator<char>(file)),
                  std::istreambuf_iterator<char>());
       if (file.bad())

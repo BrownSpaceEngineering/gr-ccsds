@@ -716,12 +716,15 @@ void proxy_cancel_request() {
 void three_party_proxy_transfer() {
   Entity originator(Config{
       .entity_id = 1,
+      .max_file_size = 50000,
       .default_peer = PeerConfig{.segment_size = 256, .ut_address = {}}}),
       respondent(Config{.entity_id = 2,
+                        .max_file_size = 50000,
                         .default_peer =
                             PeerConfig{.segment_size = 256, .ut_address = {}}}),
       beneficiary(Config{
           .entity_id = 3,
+          .max_file_size = 50000,
           .default_peer = PeerConfig{.segment_size = 256, .ut_address = {}}});
   Bytes content(50000);
   for (size_t i = 0; i < content.size(); ++i)

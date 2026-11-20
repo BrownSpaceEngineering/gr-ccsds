@@ -44,9 +44,11 @@ void transfer(std::string name, PDU_Transmission_Mode mode,
   const uint64_t source_id = reverse ? 2 : 1;
   const uint64_t destination_id = reverse ? 1 : 2;
   Entity a(Config{.entity_id = source_id,
+                  .max_file_size = 50000,
                   .default_peer =
                       PeerConfig{.segment_size = 256, .ut_address = {}}});
   Config receiver_config{.entity_id = destination_id,
+                         .max_file_size = 50000,
                          .default_peer =
                              PeerConfig{.segment_size = 256, .ut_address = {}}};
   receiver_config.default_peer.nak_mode = nak_mode;
@@ -104,9 +106,11 @@ void triggered_nak_with_loss(Nak_Mode mode, bool reverse) {
   const uint64_t destination_id = reverse ? 1 : 2;
   const std::string name = mode == Nak_Mode::Prompted ? "F4-S3" : "F4-S4";
   Entity source(Config{.entity_id = source_id,
+                       .max_file_size = 50000,
                        .default_peer =
                            PeerConfig{.segment_size = 256, .ut_address = {}}});
   Config receiver_config{.entity_id = destination_id,
+                         .max_file_size = 50000,
                          .default_peer =
                              PeerConfig{.segment_size = 256, .ut_address = {}}};
   receiver_config.default_peer.nak_mode = mode;
@@ -218,9 +222,11 @@ int main() {
     }
     {
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       Bytes source(50000, 0x5a);
@@ -246,9 +252,11 @@ int main() {
     }
     {
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       auto sequence = a.put(2, "cancel.bin", Bytes(50000, 42));
@@ -270,9 +278,11 @@ int main() {
     }
     {
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       auto sequence = a.put(2, "cancel.bin", Bytes(50000, 42));
@@ -292,9 +302,11 @@ int main() {
     }
     {
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       auto sequence = a.put(2, "cancel-unack.bin", Bytes(50000, 42),
@@ -396,10 +408,12 @@ int main() {
     {
       Config source_config{
           .entity_id = 1,
+          .max_file_size = 50000,
           .default_peer = PeerConfig{.segment_size = 256, .ut_address = {}}};
       source_config.default_peer.inactivity_limit_ticks = 3;
       Entity a(source_config),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       auto sequence = a.put(2, "sender-inactive.bin", Bytes(50000, 4));
@@ -419,9 +433,11 @@ int main() {
     {
       Config destination_config{
           .entity_id = 2,
+          .max_file_size = 50000,
           .default_peer = PeerConfig{.segment_size = 256, .ut_address = {}}};
       destination_config.default_peer.inactivity_limit_ticks = 2;
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(destination_config);
@@ -595,9 +611,11 @@ int main() {
     }
     {
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       Bytes remote_data(50000);
@@ -943,9 +961,11 @@ int main() {
     }
     {
       Entity a(Config{.entity_id = 1,
+                      .max_file_size = 50000,
                       .default_peer =
                           PeerConfig{.segment_size = 256, .ut_address = {}}}),
           b(Config{.entity_id = 2,
+                   .max_file_size = 50000,
                    .default_peer =
                        PeerConfig{.segment_size = 256, .ut_address = {}}});
       for (int i = 0; i < 5; ++i)
