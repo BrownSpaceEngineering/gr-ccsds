@@ -226,7 +226,7 @@ blocks:
     maxoutbuf: '0'
     minoutbuf: '0'
     mu: '0.5'
-    omega_relative_limit: '0.005'
+    omega_relative_limit: '0.001'
     samples_per_symbol: '8'
     sensitivity: 2*math.pi*fd/samp_rate
     verbose: 'False'
@@ -1065,7 +1065,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [368, 460.0]
+    coordinate: [408, 516.0]
     rotation: 0
     state: enabled
 - name: qtgui_waterfall_sink_x_0_0_0

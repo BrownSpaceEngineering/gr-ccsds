@@ -38,7 +38,9 @@ public:
         return physicalBytes;
     }
 
+
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
+    std::vector<uint8_t> FourEncode(const uint8_t* data, size_t length);
     void PseudoRandomize(uint8_t* data, size_t length);
     std::vector<uint8_t> Decode(const uint8_t* coded, size_t length);
     std::vector<uint8_t> FlushDecoder();

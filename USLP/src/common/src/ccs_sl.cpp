@@ -65,6 +65,43 @@ void CCS_SL::PseudoRandomize(uint8_t* data, size_t length) {
     }
 }
 
+//CCSDS r=1/2, k=4 Convolutional Encoder
+//based on IEEE Std 802.15.4g™-2012 from Atmel-42415-WIRELESS-AT86RF215
+
+std::vector<uint8_t> CCS_SL::FourEncode(const uint8_t* data, size_t length) {
+    std::vector<uint8_t> encoded(length * 2);
+    std::vector<uint8_t> g1 {3, 1, 0};
+    std::vector<uint8_t> g2 {2, 1, 0};
+    size_t outIdx = 0;
+
+    for (size_t i = 0; i < length; ++i) {
+        uint16_t packed16 = 0;
+        for (int bit = 7; bit >= 0; --bit) {
+            uint8_t inputBit = (data[i] >> bit) & 1;
+            uint8_t c1 = inputBit;
+            uint8_t c2 = inputBit;
+
+            for (int i = 0; i < 3; i++) {
+                c1 ^= ((convState >> g1[i]) & 1);
+                c2 ^= ((convState >> g2[i]) & 1);
+            }
+
+            c2 ^= 1; // invert c2
+            convState = ((convState >> 1) & 0x07) | (inputBit << 3); // Push new bit into state
+            packed16 = (packed16 << 2) | (c1 << 1) | c2; // Interleave the symbols sequentially: g1 followed by g2
+        }
+
+        // Pack the 16 output bits into two big-endian bytes
+        encoded[outIdx] = static_cast<uint8_t>((packed16 >> 8) & 0xFF);
+        encoded[outIdx + 1] = static_cast<uint8_t>(packed16 & 0xFF);
+        outIdx += 2;
+    }
+
+    return encoded;
+}
+
+
+
 // Standard CCSDS r=1/2, K=7 Convolutional Encoder
 std::vector<uint8_t> CCS_SL::Encode(const uint8_t* data, size_t length) {
     // Dynamically allocate a flat vector to store the double-sized coded symbols.
