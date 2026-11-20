@@ -194,6 +194,56 @@ void queue_limit_is_atomic() {
         "failed Put left transaction or queued PDUs");
 }
 
+void resume_queue_limit_is_atomic() {
+  // Exercise failure before the first PDU and after part of the batch fits.
+  for (const size_t limit : {100, 150}) {
+    Config config{1};
+    config.max_queued_pdu_bytes = limit;
+    Entity source(config), receiver(Config{2});
+    const Bytes data(20, 1);
+    const auto suspended = source.put(2, "a", data);
+    source.suspend_send(suspended);
+    const auto other = source.put(2, "b", data);
+    source.take_events();
+
+    rejects([&] { source.resume_send(suspended); },
+            "resume ignored outgoing queue limit");
+    check(source.take_events().empty(), "failed resume emitted an event");
+    check(source.report_send(suspended).suspended &&
+              !source.sender_complete(suspended),
+          "failed resume changed sender state");
+    const auto queued = source.take_outgoing();
+    check(queued.size() == 3, "failed resume changed the outgoing queue");
+    for (const auto &wire : queued) {
+      check(CFDP_PDU::from_bytes(wire).header.transactionSequenceNumber == other,
+            "failed resume left a partial PDU batch");
+      receiver.receive(wire);
+    }
+    // Finish the other transaction before retrying the suspended transfer.
+    for (const auto &wire : receiver.take_outgoing())
+      source.receive(wire);
+    for (const auto &wire : source.take_outgoing())
+      receiver.receive(wire);
+    source.take_events();
+
+    source.resume_send(suspended);
+    const auto events = source.take_events();
+    check(events.size() == 1 && events[0].type == Event_Type::Resumed &&
+              events[0].sequence == suspended,
+          "successful resume did not emit exactly one Resumed event");
+    for (const auto &wire : source.take_outgoing())
+      receiver.receive(wire);
+    for (const auto &wire : receiver.take_outgoing())
+      source.receive(wire);
+    for (const auto &wire : source.take_outgoing())
+      receiver.receive(wire);
+    check(source.sender_result(suspended) == Condition_Code::NoError &&
+              receiver.receiver_complete(1, suspended) &&
+              receiver.read_file("a") == data,
+          "resume could not recover after draining the queue");
+  }
+}
+
 void finished_waits_for_queue_space() {
   Entity source(Config{1});
   const auto sequence = source.put(2, "queued", {1, 2, 3});
@@ -884,6 +934,7 @@ int main() {
     independent_timers_and_capacity();
     malformed_metadata_is_atomic();
     queue_limit_is_atomic();
+    resume_queue_limit_is_atomic();
     finished_waits_for_queue_space();
     failed_finished_waits_for_queue_space();
     cancelled_finished_waits_for_queue_space();

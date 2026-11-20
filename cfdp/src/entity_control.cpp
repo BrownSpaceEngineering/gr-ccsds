@@ -200,17 +200,22 @@ void Entity::resume_send(uint64_t sequence) {
   if (it == senders_.end())
     throw std::invalid_argument("unknown CFDP transaction");
   auto &s = it->second;
-  s.local_suspended = false;
   if (!s.suspended ||
-      remote_suspensions_.contains(Key{config_.entity_id, sequence}))
+      remote_suspensions_.contains(Key{config_.entity_id, sequence})) {
+    s.local_suspended = false;
     return;
+  }
+  auto batch = prepare_sender_pdus(s);
+  outgoing_.reserve(outgoing_.size() + batch.pdus.size());
+  events_.reserve(events_.size() + 1);
+  // All serialization and allocation succeeds before publishing the resume.
+  s.local_suspended = false;
   s.suspended = false;
   s.idle_ticks = 0;
   s.eof_issued = false;
-  emit(s.header, s.metadata);
-  for (const auto &segment : s.segments)
-    emit(s.header, segment);
-  emit(s.header, s.eof);
+  for (auto &queued : batch.pdus)
+    outgoing_.push_back(std::move(queued));
+  queued_bytes_ += batch.bytes;
   event(Event_Type::Resumed, s.header, Condition_Code::NoError, s.file_size);
 }
 

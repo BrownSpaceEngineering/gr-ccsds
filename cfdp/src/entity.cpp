@@ -133,6 +133,24 @@ void Entity::emit(PDU_Header h, PDU_Body body) {
   outgoing_.push_back({remote, std::move(bytes)});
 }
 
+Entity::PDU_Batch Entity::prepare_sender_pdus(const Sender &sender) const {
+  PDU_Batch batch;
+  const size_t available = config_.max_queued_pdu_bytes - queued_bytes_;
+  auto append = [&](PDU_Body body) {
+    Bytes bytes = CFDP_PDU{sender.header, std::move(body)}.to_bytes();
+    if (bytes.size() > available - batch.bytes)
+      throw std::length_error("CFDP outgoing queue limit exceeded");
+    batch.bytes += bytes.size();
+    batch.pdus.push_back(
+        {sender.header.destinationEntityID, std::move(bytes)});
+  };
+  append(sender.metadata);
+  for (const auto &segment : sender.segments)
+    append(segment);
+  append(sender.eof);
+  return batch;
+}
+
 void Entity::event(Event_Type type, const PDU_Header &h,
                    Condition_Code condition, uint64_t progress) {
   Event next{};
@@ -272,26 +290,13 @@ uint64_t Entity::put(uint64_t destination_id, std::string destination_name,
       begin += length;
     }
   }
-  std::vector<Queued_PDU> initial;
-  size_t initial_bytes = 0;
-  auto queue_initial = [&](PDU_Body body) {
-    Bytes wire = CFDP_PDU{h, std::move(body)}.to_bytes();
-    const size_t available = config_.max_queued_pdu_bytes - queued_bytes_;
-    if (wire.size() > available - initial_bytes)
-      throw std::length_error("CFDP outgoing queue limit exceeded");
-    initial_bytes += wire.size();
-    initial.push_back({destination_id, std::move(wire)});
-  };
-  queue_initial(metadata);
-  for (const auto &segment : sender.segments)
-    queue_initial(segment);
-  queue_initial(eof);
-  outgoing_.reserve(outgoing_.size() + initial.size());
+  auto initial = prepare_sender_pdus(sender);
+  outgoing_.reserve(outgoing_.size() + initial.pdus.size());
   senders_.emplace(sequence, std::move(sender));
   next_sequence_ = sequence == max_sequence ? 1 : sequence + 1;
-  for (auto &queued : initial)
+  for (auto &queued : initial.pdus)
     outgoing_.push_back(std::move(queued));
-  queued_bytes_ += initial_bytes;
+  queued_bytes_ += initial.bytes;
   event(Event_Type::TransactionStarted, h);
   events_.back().source_name = metadata.sourceFileName;
   events_.back().destination_name = metadata.destinationFileName;

@@ -320,6 +320,11 @@ private:
     uint64_t peer;
     Bytes bytes;
   };
+  struct PDU_Batch {
+    std::vector<Queued_PDU> pdus;
+    size_t bytes = 0;
+  };
+  PDU_Batch prepare_sender_pdus(const Sender &sender) const;
   std::vector<Queued_PDU> outgoing_;
   size_t queued_bytes_ = 0;
   std::map<uint64_t, std::pair<bool, bool>> link_opportunities_;
