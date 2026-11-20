@@ -89,7 +89,7 @@ struct PeerConfig {
 
 struct Config {
   uint64_t entity_id = 0;
-  uint8_t id_width = 1;
+  uint8_t id_width = 4;
   uint8_t sequence_width = 1;
   size_t max_file_size = 64 * 1024 * 1024;
   PeerConfig default_peer = {};
@@ -163,7 +163,8 @@ class Entity {
 public:
   explicit Entity(Config config);
   ~Entity();
-  // Omitted mode, checksum, and closure options use the destination peer defaults.
+  // Omitted mode, checksum, and closure options use the destination peer
+  // defaults.
   uint64_t put(uint64_t destination_id, std::string destination_name,
                Bytes data,
                std::optional<PDU_Transmission_Mode> mode = std::nullopt,

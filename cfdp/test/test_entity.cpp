@@ -13,19 +13,23 @@ void check(bool good, const char *message) {
 
 void run(PDU_Transmission_Mode mode, bool loss) {
   Entity sender(
-      Config{.entity_id = 1,
+      Config{.entity_id = 0x02,
              .default_peer = PeerConfig{.segment_size = 3, .ut_address = {}}});
   Entity receiver(
-      Config{.entity_id = 2,
+      Config{.entity_id = 0x50564485,
              .default_peer = PeerConfig{.segment_size = 3, .ut_address = {}}});
   Bytes source{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
-  const auto sequence = sender.put(2, "result.bin", source, mode);
+  const auto sequence = sender.put(0x50564485, "result.bin", source, mode);
   auto initial = sender.take_outgoing();
   check(initial.size() == 5, "unexpected initial PDU count");
   for (size_t i = 0; i < initial.size(); ++i) {
     if (loss && (i == 0 || i == 2))
       continue; // Missing metadata and middle segment.
     auto decoded = CFDP_PDU::from_bytes(initial[i]);
+    check(decoded.header.entityLength == 4, "entity IDs must use four octets");
+    check(decoded.header.sourceEntityID == 0x02 &&
+              decoded.header.destinationEntityID == 0x50564485,
+          "entity IDs changed on the wire");
     check(decoded.to_bytes() == initial[i], "PDU failed round trip");
     receiver.receive(initial[i]);
   }

@@ -39,6 +39,7 @@ template <typename F> bool rejects(F &&f, const char *name) {
 int main() {
   bool ok = true;
   CFDP_PDU packet;
+  packet.header.entityLength = 1; // Keep the one-octet wire fixtures explicit.
   Metadata_PDU metadata;
   metadata.closureRequested = true;
   metadata.checksumType = 2;
@@ -73,6 +74,7 @@ int main() {
               "file data");
 
   packet.header = {};
+  packet.header.entityLength = 1;
   packet.body = EOF_PDU{Condition_Code::NoError, 0x12345678, 5, {}};
   ok &=
       check(packet.to_bytes(),
@@ -86,6 +88,7 @@ int main() {
               "large EOF");
 
   packet.header = {};
+  packet.header.entityLength = 1;
   Finished_PDU finished;
   finished.condition = Condition_Code::FilestoreRejection;
   finished.delivery = Delivery_Code::Incomplete;
@@ -127,6 +130,7 @@ int main() {
   packet.header.sourceEntityID = 256;
   ok &= rejects([&] { packet.to_bytes(); }, "entity ID width");
   packet.header = {};
+  packet.header.entityLength = 1;
   packet.body = Metadata_PDU{};
   std::get<Metadata_PDU>(packet.body).sourceFileName.assign(256, 'a');
   ok &= rejects([&] { packet.to_bytes(); }, "name length");

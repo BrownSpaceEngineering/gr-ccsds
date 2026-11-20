@@ -21,7 +21,7 @@ from spacepackets.cfdp.tlv import (FileStoreRequestTlv, FilestoreActionCode,
                                   FilestoreResponseStatusCode)
 from spacepackets.countdown import Countdown
 from spacepackets.seqcount import SeqCountProvider
-from spacepackets.util import ByteFieldU8
+from spacepackets.util import ByteFieldU32
 
 
 BIN = Path(__file__).resolve().parents[1] / "bin" / "cfdp"
@@ -66,9 +66,9 @@ class CheckTimers(CheckTimerProvider):
 
 
 def config(local_id, remote_id, mode, crc=False):
-    local = LocalEntityConfig(ByteFieldU8(local_id), IndicationConfig(), Faults())
+    local = LocalEntityConfig(ByteFieldU32(local_id), IndicationConfig(), Faults())
     remote = RemoteEntityConfig(
-        entity_id=ByteFieldU8(remote_id), max_file_segment_len=512,
+        entity_id=ByteFieldU32(remote_id), max_file_segment_len=512,
         max_packet_len=1200, closure_requested=False,
         crc_on_transmission=crc, default_transmission_mode=mode,
         crc_type=ChecksumType.MODULAR,
@@ -222,7 +222,7 @@ def python_to_cpp(mode, drop_data=False, crc=False, reorder_data=False,
                 reorder = {"held": None, "done": False} if reorder_data else None
                 dropped = {"type": drop_control[1], "done": False} if drop_control else None
                 handler.put_request(PutRequest(
-                    destination_id=ByteFieldU8(2), source_file=root / "source.bin",
+                    destination_id=ByteFieldU32(2), source_file=root / "source.bin",
                     dest_file=Path("received.bin"), trans_mode=mode,
                     closure_requested=False,
                     fs_requests=[FileStoreRequestTlv(

@@ -32,7 +32,7 @@ struct PDU_Header {
   uint16_t fieldLength = 0;
   PDU_Segmentation_Control segmentationControl =
       PDU_Segmentation_Control::BoundariesNotPreserved;
-  uint8_t entityLength = 1;
+  uint8_t entityLength = 4;
   PDU_Segment_Metadata_Flag segmentMetadataFlag =
       PDU_Segment_Metadata_Flag::NotPresent;
   uint8_t transactionSequenceNumberLength = 1;
