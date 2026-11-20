@@ -25,11 +25,13 @@ bin/$(NAME): $(OBJ)
 
 bin/test_%: test/test_%.cpp $(TEST_OBJ)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -Isrc -o $@ $^
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Isrc -o $@ $^
 
 build/%.o: src/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -o $@ -c $<
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -o $@ -c $<
+
+-include $(OBJ:.o=.d)
 
 clean:
 	rm -rf build bin

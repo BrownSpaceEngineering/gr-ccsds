@@ -1,5 +1,4 @@
 #include "space_packet.h"
-#include "binary_reader.h"
 
 #include <cstdint>
 #include <optional>
