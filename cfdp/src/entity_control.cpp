@@ -21,35 +21,9 @@ void Entity::advance(std::chrono::milliseconds elapsed) {
 void Entity::tick() { advance(std::chrono::seconds(1)); }
 
 void Entity::step() {
-  for (auto &[sequence, s] : senders_) {
+  for (auto &[sequence, sender] : senders_) {
     (void)sequence;
-    if ((s.done && !s.cancelling) || s.suspended || !s.eof_issued)
-      continue;
-    if (auto opportunity =
-            link_opportunities_.find(s.header.destinationEntityID);
-        opportunity != link_opportunities_.end() &&
-        (!opportunity->second.first ||
-         (acknowledged(s.header) && !opportunity->second.second)))
-      continue;
-    const PeerConfig &settings = peer(s.header.destinationEntityID);
-    if (!acknowledged(s.header) && s.metadata.closureRequested &&
-        ++s.check_ticks >= settings.check_interval_ticks) {
-      s.check_ticks = 0;
-      if (++s.check_retries >= settings.check_limit)
-        fail(s, Condition_Code::CheckLimitReached);
-    }
-    if ((s.done && !s.cancelling) || s.suspended || !s.eof_issued)
-      continue;
-    if (++s.idle_ticks >= settings.inactivity_limit_ticks) {
-      fail(s, Condition_Code::InactivityDetected);
-    } else if (acknowledged(s.header) && !s.eof_acked &&
-               ++s.ack_ticks >= settings.ack_interval_ticks) {
-      s.ack_ticks = 0;
-      if (s.ack_retries++ >= settings.ack_retry_limit)
-        fail(s, Condition_Code::AckLimitReached);
-      else
-        emit(s.header, s.eof);
-    }
+    step_sender(sender);
   }
   for (auto &[key, r] : receivers_) {
     (void)key;
@@ -112,39 +86,6 @@ void Entity::step() {
   }
 }
 
-void Entity::cancel_send(uint64_t sequence) {
-  auto it = senders_.find(sequence);
-  if (it == senders_.end())
-    throw std::invalid_argument("unknown CFDP transaction");
-  auto &s = it->second;
-  if (s.done && acknowledged(s.header))
-    return;
-  s.eof = EOF_PDU{Condition_Code::CancelRequested, 0, s.file_size,
-                  config_.entity_id};
-  s.result = Condition_Code::CancelRequested;
-  s.cancelling = acknowledged(s.header);
-  s.eof_issued = false;
-  s.eof_acked = false;
-  s.ack_retries = 0;
-  s.ack_ticks = 0;
-  outgoing_.erase(
-      std::remove_if(outgoing_.begin(), outgoing_.end(),
-                     [&](const Queued_PDU &queued) {
-                       const auto pdu = CFDP_PDU::from_bytes(queued.bytes);
-                       if (pdu.header.sourceEntityID == config_.entity_id &&
-                           pdu.header.transactionSequenceNumber == sequence)
-                         queued_bytes_ -= queued.bytes.size();
-                       return pdu.header.sourceEntityID == config_.entity_id &&
-                              pdu.header.transactionSequenceNumber == sequence;
-                     }),
-      outgoing_.end());
-  emit(s.header, s.eof);
-  if (!acknowledged(s.header)) {
-    s.done = true;
-    event(Event_Type::TransactionFinished, s.header, s.result, s.file_size);
-  }
-}
-
 void Entity::cancel_receive(uint64_t source_id, uint64_t sequence) {
   auto it = receivers_.find(Key{source_id, sequence});
   if (it == receivers_.end())
@@ -167,56 +108,6 @@ void Entity::cancel_receive(uint64_t source_id, uint64_t sequence) {
         Condition_Code::CancelRequested, r.covered);
   events_.back().delivery = Delivery_Code::Incomplete;
   events_.back().file_status = File_Status::DiscardedDeliberately;
-}
-
-void Entity::suspend_send(uint64_t sequence) {
-  auto it = senders_.find(sequence);
-  if (it == senders_.end())
-    throw std::invalid_argument("unknown CFDP transaction");
-  auto &s = it->second;
-  if (s.done)
-    return;
-  s.local_suspended = true;
-  if (s.suspended)
-    return;
-  s.suspended = true;
-  outgoing_.erase(
-      std::remove_if(outgoing_.begin(), outgoing_.end(),
-                     [&](const Queued_PDU &queued) {
-                       const auto pdu = CFDP_PDU::from_bytes(queued.bytes);
-                       if (pdu.header.sourceEntityID == config_.entity_id &&
-                           pdu.header.transactionSequenceNumber == sequence)
-                         queued_bytes_ -= queued.bytes.size();
-                       return pdu.header.sourceEntityID == config_.entity_id &&
-                              pdu.header.transactionSequenceNumber == sequence;
-                     }),
-      outgoing_.end());
-  event(Event_Type::Suspended, s.header, Condition_Code::SuspendRequested,
-        s.file_size);
-}
-
-void Entity::resume_send(uint64_t sequence) {
-  auto it = senders_.find(sequence);
-  if (it == senders_.end())
-    throw std::invalid_argument("unknown CFDP transaction");
-  auto &s = it->second;
-  if (!s.suspended ||
-      remote_suspensions_.contains(Key{config_.entity_id, sequence})) {
-    s.local_suspended = false;
-    return;
-  }
-  auto batch = prepare_sender_pdus(s);
-  outgoing_.reserve(outgoing_.size() + batch.pdus.size());
-  events_.reserve(events_.size() + 1);
-  // All serialization and allocation succeeds before publishing the resume.
-  s.local_suspended = false;
-  s.suspended = false;
-  s.idle_ticks = 0;
-  s.eof_issued = false;
-  for (auto &queued : batch.pdus)
-    outgoing_.push_back(std::move(queued));
-  queued_bytes_ += batch.bytes;
-  event(Event_Type::Resumed, s.header, Condition_Code::NoError, s.file_size);
 }
 
 void Entity::suspend_receive(uint64_t source_id, uint64_t sequence) {
@@ -287,8 +178,7 @@ Entity::RemoteOrderResult Entity::apply_remote_order(uint64_t requester,
     auto &orders = remote_suspensions_[key];
     if (orders.insert(requester).second) {
       if (sender != senders_.end() && !sender->second.suspended) {
-        suspend_send(sequence);
-        sender->second.local_suspended = false;
+        suspend_sender(sender->second, Condition_Code::SuspendRequested);
       } else if (receiver != receivers_.end() && !receiver->second.suspended) {
         suspend_receive(source_id, sequence);
         receiver->second.local_suspended = false;
@@ -356,12 +246,8 @@ void Entity::forget_send(uint64_t sequence) {
     throw std::invalid_argument("CFDP sender transaction is not complete");
   if (user_operations_.has_pending_proxy(sequence))
     throw std::logic_error("CFDP proxy response is still pending");
-  for (const auto &queued : outgoing_) {
-    const auto pdu = CFDP_PDU::from_bytes(queued.bytes);
-    if (pdu.header.sourceEntityID == config_.entity_id &&
-        pdu.header.transactionSequenceNumber == sequence)
-      throw std::logic_error("CFDP transaction still has queued PDUs");
-  }
+  if (queued_bytes(Key{config_.entity_id, sequence}))
+    throw std::logic_error("CFDP transaction still has queued PDUs");
   remote_suspensions_.erase(Key{config_.entity_id, sequence});
   senders_.erase(it);
 }
@@ -373,12 +259,8 @@ void Entity::forget_receive(uint64_t source_id, uint64_t sequence) {
     throw std::invalid_argument("CFDP receiver transaction is not complete");
   if (it->second.finished_pending)
     throw std::logic_error("CFDP transaction still has a pending Finished PDU");
-  for (const auto &queued : outgoing_) {
-    const auto pdu = CFDP_PDU::from_bytes(queued.bytes);
-    if (pdu.header.sourceEntityID == source_id &&
-        pdu.header.transactionSequenceNumber == sequence)
-      throw std::logic_error("CFDP transaction still has queued PDUs");
-  }
+  if (queued_bytes(key))
+    throw std::logic_error("CFDP transaction still has queued PDUs");
   remote_suspensions_.erase(key);
   receivers_.erase(it);
 }

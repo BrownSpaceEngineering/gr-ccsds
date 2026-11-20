@@ -7,7 +7,7 @@ SRC = $(wildcard src/*.cpp)
 COMMON_SRC = $(wildcard ../common/*.cpp)
 OBJ = $(patsubst src/%.cpp,build/%.o,$(SRC)) $(patsubst ../common/%.cpp,build/common/%.o,$(COMMON_SRC))
 TEST_OBJ = $(filter-out build/main.o,$(OBJ))
-TEST_SRC = test/test_cfdp.cpp test/test_entity.cpp test/notebook_core.cpp test/test_completion.cpp test/test_sender_completion.cpp test/test_persistence.cpp test/test_disk_filestore.cpp test/test_async_storage.cpp
+TEST_SRC = test/test_cfdp.cpp test/test_entity.cpp test/notebook_core.cpp test/test_completion.cpp test/test_sender_completion.cpp test/test_sender_transitions.cpp test/test_persistence.cpp test/test_disk_filestore.cpp test/test_async_storage.cpp
 TEST_BIN = $(patsubst test/%.cpp,bin/%,$(TEST_SRC))
 
 NAME = cfdp

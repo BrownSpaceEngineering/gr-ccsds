@@ -13,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cfdp {
@@ -229,11 +230,13 @@ private:
   struct Key {
     uint64_t source;
     uint64_t sequence;
+    bool operator==(const Key &) const = default;
     bool operator<(const Key &other) const {
       return source < other.source ||
              (source == other.source && sequence < other.sequence);
     }
   };
+  struct Queued_PDU;
   struct RemoteOrderResult {
     Transaction_Status status;
     bool suspended;
@@ -291,7 +294,16 @@ private:
   };
   void emit(PDU_Header header, PDU_Body body);
   bool queue_pending_finished();
-  void mark_issued(const Bytes &bytes);
+  void mark_issued(const Queued_PDU &queued);
+  void mark_sender_issued(Sender &sender, const Queued_PDU &queued);
+  void receive_sender(const CFDP_PDU &pdu);
+  void step_sender(Sender &sender);
+  void suspend_sender(Sender &sender, Condition_Code condition);
+  void cancel_sender(Sender &sender, Condition_Code condition);
+  void abandon_sender(Sender &sender, Condition_Code condition);
+  void finish_sender(Sender &sender, const Finished_PDU &finished);
+  Fault_Handler fault_handler(const std::vector<TLV> &options,
+                              Condition_Code condition) const;
   const PeerConfig &peer(uint64_t id) const;
   size_t active_data_bytes() const;
   void step();
@@ -317,14 +329,30 @@ private:
   std::map<Key, Receiver> receivers_;
   std::map<Key, std::set<uint64_t>> remote_suspensions_;
   struct Queued_PDU {
+    enum class Issue { None, FileData, EndOfFile, Finished };
     uint64_t peer;
+    Key transaction;
     Bytes bytes;
+    Issue issue = Issue::None;
+    uint64_t progress = 0;
+    Condition_Code condition = Condition_Code::NoError;
   };
   struct PDU_Batch {
     std::vector<Queued_PDU> pdus;
     size_t bytes = 0;
+    void add(Queued_PDU queued) {
+      const size_t size = queued.bytes.size();
+      pdus.push_back(std::move(queued));
+      bytes += size;
+    }
   };
   PDU_Batch prepare_sender_pdus(const Sender &sender) const;
+  Queued_PDU encode_pdu(PDU_Header header, PDU_Body body) const;
+  void reserve_outgoing(const PDU_Batch &batch, size_t released_bytes = 0);
+  // reserve_outgoing() must succeed before publishing the batch.
+  void append_outgoing(PDU_Batch batch) noexcept;
+  size_t queued_bytes(Key transaction) const;
+  void discard_outgoing(Key transaction) noexcept;
   std::vector<Queued_PDU> outgoing_;
   size_t queued_bytes_ = 0;
   std::map<uint64_t, std::pair<bool, bool>> link_opportunities_;

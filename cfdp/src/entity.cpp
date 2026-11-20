@@ -19,25 +19,6 @@ static_assert(std::is_nothrow_move_constructible_v<Transfer>);
 static_assert(std::is_nothrow_move_constructible_v<Event>);
 static_assert(std::is_nothrow_move_assignable_v<Finished_PDU>);
 
-Fault_Handler select_fault_handler(const Config &config,
-                                   const std::vector<TLV> &options,
-                                   Condition_Code condition) {
-  Fault_Handler handler = Fault_Handler::Cancel;
-  if (auto configured = config.default_fault_handlers.find(condition);
-      configured != config.default_fault_handlers.end())
-    handler = configured->second;
-  for (const auto &option : options)
-    if (option.type == TLV_Type::FaultHandlerOverrides &&
-        option.value.size() == 1 &&
-        (option.value[0] >> wire::condition_shift) ==
-            static_cast<uint8_t>(condition)) {
-      const auto code = option.value[0] & wire::low_nibble_mask;
-      if (code >= static_cast<uint8_t>(Fault_Handler::Cancel) &&
-          code <= static_cast<uint8_t>(Fault_Handler::Abandon))
-        handler = static_cast<Fault_Handler>(code);
-    }
-  return handler;
-}
 void validate_peer(const PeerConfig &peer) {
   if (peer.protocol_version != 1 ||
       static_cast<uint8_t>(peer.default_mode) > 1 ||
@@ -119,36 +100,6 @@ size_t Entity::active_data_bytes() const {
       total += receiver.data.size() + receiver.present.size();
   }
   return total;
-}
-
-void Entity::emit(PDU_Header h, PDU_Body body) {
-  const uint64_t remote = h.direction == PDU_Direction::ToFileReceiver
-                              ? h.destinationEntityID
-                              : h.sourceEntityID;
-  Bytes bytes = CFDP_PDU{h, std::move(body)}.to_bytes();
-  if (bytes.size() > config_.max_queued_pdu_bytes ||
-      queued_bytes_ > config_.max_queued_pdu_bytes - bytes.size())
-    throw std::length_error("CFDP outgoing queue limit exceeded");
-  queued_bytes_ += bytes.size();
-  outgoing_.push_back({remote, std::move(bytes)});
-}
-
-Entity::PDU_Batch Entity::prepare_sender_pdus(const Sender &sender) const {
-  PDU_Batch batch;
-  const size_t available = config_.max_queued_pdu_bytes - queued_bytes_;
-  auto append = [&](PDU_Body body) {
-    Bytes bytes = CFDP_PDU{sender.header, std::move(body)}.to_bytes();
-    if (bytes.size() > available - batch.bytes)
-      throw std::length_error("CFDP outgoing queue limit exceeded");
-    batch.bytes += bytes.size();
-    batch.pdus.push_back(
-        {sender.header.destinationEntityID, std::move(bytes)});
-  };
-  append(sender.metadata);
-  for (const auto &segment : sender.segments)
-    append(segment);
-  append(sender.eof);
-  return batch;
 }
 
 void Entity::event(Event_Type type, const PDU_Header &h,
@@ -291,12 +242,10 @@ uint64_t Entity::put(uint64_t destination_id, std::string destination_name,
     }
   }
   auto initial = prepare_sender_pdus(sender);
-  outgoing_.reserve(outgoing_.size() + initial.pdus.size());
+  reserve_outgoing(initial);
   senders_.emplace(sequence, std::move(sender));
   next_sequence_ = sequence == max_sequence ? 1 : sequence + 1;
-  for (auto &queued : initial.pdus)
-    outgoing_.push_back(std::move(queued));
-  queued_bytes_ += initial.bytes;
+  append_outgoing(std::move(initial));
   event(Event_Type::TransactionStarted, h);
   events_.back().source_name = metadata.sourceFileName;
   events_.back().destination_name = metadata.destinationFileName;
@@ -377,51 +326,31 @@ void Entity::request_missing(Receiver &r, bool force, uint64_t scope_end) {
     emit(reverse(r.header), nak);
 }
 
-void Entity::fail(Sender &s, Condition_Code condition) {
-  if (s.done && !s.cancelling)
-    return;
-  if (s.cancelling) {
-    s.cancelling = false;
-    s.done = true;
-    event(Event_Type::Abandoned, s.header, condition, s.file_size);
-    return;
-  }
-  event(Event_Type::Fault, s.header, condition, s.file_size);
-  const auto handler =
-      select_fault_handler(config_, s.metadata.options, condition);
-  if (handler == Fault_Handler::Ignore) {
-    s.idle_ticks = 0;
-    s.ack_retries = 0;
-    return;
-  }
-  if (handler == Fault_Handler::Suspend) {
-    s.suspended = true;
-    s.local_suspended = true;
-    event(Event_Type::Suspended, s.header, condition, s.file_size);
-    return;
-  }
-  s.result = condition;
-  s.done = true;
-  if (handler == Fault_Handler::Abandon) {
-    event(Event_Type::Abandoned, s.header, condition, s.file_size);
-    return;
-  }
-  s.cancelling = acknowledged(s.header);
-  s.eof_issued = false;
-  s.eof_acked = false;
-  s.ack_retries = 0;
-  s.ack_ticks = 0;
-  s.eof = EOF_PDU{condition, 0, s.file_size, config_.entity_id};
-  emit(s.header, s.eof);
-  event(Event_Type::TransactionFinished, s.header, condition, s.file_size);
+Fault_Handler Entity::fault_handler(const std::vector<TLV> &options,
+                                   Condition_Code condition) const {
+  Fault_Handler handler = Fault_Handler::Cancel;
+  if (auto configured = config_.default_fault_handlers.find(condition);
+      configured != config_.default_fault_handlers.end())
+    handler = configured->second;
+  for (const auto &option : options)
+    if (option.type == TLV_Type::FaultHandlerOverrides &&
+        option.value.size() == 1 &&
+        (option.value[0] >> wire::condition_shift) ==
+            static_cast<uint8_t>(condition)) {
+      const auto code = option.value[0] & wire::low_nibble_mask;
+      if (code >= static_cast<uint8_t>(Fault_Handler::Cancel) &&
+          code <= static_cast<uint8_t>(Fault_Handler::Abandon))
+        handler = static_cast<Fault_Handler>(code);
+    }
+  return handler;
 }
 
 void Entity::fail(Receiver &r, Condition_Code condition) {
   if (r.terminated)
     return;
   event(Event_Type::Fault, r.header, condition, r.covered);
-  const auto handler = select_fault_handler(
-      config_, r.metadata ? r.metadata->options : std::vector<TLV>{},
+  const auto handler = fault_handler(
+      r.metadata ? r.metadata->options : std::vector<TLV>{},
       condition);
   if (handler == Fault_Handler::Ignore) {
     r.idle_ticks = 0;
@@ -530,88 +459,7 @@ void Entity::receive(const Bytes &bytes) {
     validate_metadata_options(*metadata);
   }
   if (h.direction == PDU_Direction::ToFileSender) {
-    if (h.sourceEntityID != config_.entity_id)
-      throw std::invalid_argument("invalid CFDP reverse direction");
-    auto it = senders_.find(h.transactionSequenceNumber);
-    if (it == senders_.end() ||
-        it->second.header.destinationEntityID != h.destinationEntityID)
-      throw std::invalid_argument("unknown CFDP sender transaction");
-    auto &s = it->second;
-    if (h.transmissionMode != s.header.transmissionMode ||
-        h.largeFileFlag != s.header.largeFileFlag ||
-        h.entityLength != s.header.entityLength ||
-        h.transactionSequenceNumberLength !=
-            s.header.transactionSequenceNumberLength)
-      throw std::invalid_argument("inconsistent CFDP reverse header");
-    if (auto ack = std::get_if<ACK_PDU>(&pdu.body)) {
-      if (ack->directive == Acknowledged_Directive::EndOfFile) {
-        if (!acknowledged(s.header) || !s.eof_issued ||
-            ack->condition != s.eof.condition)
-          throw std::invalid_argument("unexpected CFDP EOF ACK");
-        s.idle_ticks = 0;
-        s.eof_acked = true;
-        s.ack_retries = 0;
-        s.ack_ticks = 0;
-        if (s.cancelling && s.done)
-          s.cancelling = false;
-      } else
-        throw std::invalid_argument("unexpected CFDP sender ACK");
-    } else if (auto nak = std::get_if<NAK_PDU>(&pdu.body)) {
-      if (!acknowledged(s.header) || s.done)
-        throw std::invalid_argument("unexpected CFDP NAK");
-      for (const auto &request : nak->segmentRequests) {
-        if (request.startOffset == 0 && request.endOffset == 0)
-          continue;
-        if (request.endOffset > s.file_size ||
-            request.startOffset >= request.endOffset)
-          throw std::invalid_argument("invalid CFDP NAK range");
-      }
-      s.idle_ticks = 0;
-      for (const auto &request : nak->segmentRequests) {
-        if (request.startOffset == 0 && request.endOffset == 0) {
-          emit(s.header, s.metadata);
-          continue;
-        }
-        for (const auto &segment : s.segments)
-          if (segment.offset < request.endOffset &&
-              segment.offset + segment.data.size() > request.startOffset)
-            emit(s.header, segment);
-      }
-    } else if (auto finished = std::get_if<Finished_PDU>(&pdu.body)) {
-      if (!s.eof_issued ||
-          (!acknowledged(s.header) && !s.metadata.closureRequested))
-        throw std::invalid_argument("unexpected CFDP Finished");
-      s.idle_ticks = 0;
-      if (acknowledged(s.header))
-        emit(s.header,
-             ACK_PDU{Acknowledged_Directive::Finished, finished->condition,
-                     Transaction_Status::Terminated});
-      s.result = finished->condition;
-      s.filestore_responses = finished->filestoreResponses;
-      if (!s.done)
-        event(Event_Type::TransactionFinished, s.header, s.result, s.file_size);
-      if (!s.done) {
-        events_.back().delivery = finished->delivery;
-        events_.back().file_status = finished->fileStatus;
-        events_.back().filestore_responses = finished->filestoreResponses;
-      }
-      s.done = true;
-      s.cancelling = false;
-    } else if (auto keepalive = std::get_if<KeepAlive_PDU>(&pdu.body)) {
-      if (!acknowledged(s.header) || s.done ||
-          keepalive->progress > s.file_size)
-        throw std::invalid_argument("invalid CFDP keep alive progress");
-      s.idle_ticks = 0;
-      if (keepalive->progress > s.keep_alive_progress) {
-        s.keep_alive_progress = keepalive->progress;
-        s.keep_alive_stalls = 0;
-      } else if (peer(s.header.destinationEntityID).keep_alive_limit &&
-                 ++s.keep_alive_stalls >=
-                     peer(s.header.destinationEntityID).keep_alive_limit) {
-        fail(s, Condition_Code::KeepAliveLimitReached);
-      }
-    } else
-      throw std::invalid_argument("unexpected CFDP sender PDU");
+    receive_sender(pdu);
     return;
   }
   if (h.destinationEntityID != config_.entity_id)
@@ -808,100 +656,6 @@ void Entity::set_link_opportunity(uint64_t peer_id, bool transmit,
   link_opportunities_[peer_id] = {transmit, receive};
 }
 
-bool Entity::queue_pending_finished() {
-  bool queued_any = false;
-  for (auto &[key, receiver] : receivers_) {
-    (void)key;
-    if (!receiver.finished_pending)
-      continue;
-    Bytes wire =
-        CFDP_PDU{reverse(receiver.header), receiver.finished}.to_bytes();
-    if (wire.size() > config_.max_queued_pdu_bytes - queued_bytes_)
-      continue;
-    const size_t size = wire.size();
-    outgoing_.push_back({receiver.header.sourceEntityID, std::move(wire)});
-    queued_bytes_ += size;
-    receiver.finished_pending = false;
-    queued_any = true;
-  }
-  return queued_any;
-}
-
-size_t Entity::send_outgoing(
-    const std::function<bool(uint64_t, const Bytes &)> &send) {
-  poll_storage();
-  if (!send)
-    throw std::invalid_argument("CFDP transport callback is empty");
-  std::set<uint64_t> blocked_peers;
-  size_t issued = 0;
-  auto drain = [&] {
-    std::vector<Queued_PDU> held;
-    for (auto &queued : outgoing_) {
-      const auto opportunity = link_opportunities_.find(queued.peer);
-      if (blocked_peers.contains(queued.peer) ||
-          (opportunity != link_opportunities_.end() &&
-           !opportunity->second.first)) {
-        blocked_peers.insert(queued.peer);
-        held.push_back(std::move(queued));
-      } else if (!send(queued.peer, queued.bytes)) {
-        blocked_peers.insert(queued.peer);
-        held.push_back(std::move(queued));
-      } else {
-        mark_issued(queued.bytes);
-        queued_bytes_ -= queued.bytes.size();
-        ++issued;
-      }
-    }
-    outgoing_.swap(held);
-  };
-  user_operations_.poll_completed(*this);
-  queue_pending_finished();
-  drain();
-  user_operations_.poll_completed(*this);
-  if (queue_pending_finished() || !outgoing_.empty())
-    drain();
-  return issued;
-}
-
-std::vector<Bytes> Entity::take_outgoing() {
-  std::vector<Bytes> result;
-  send_outgoing([&](uint64_t, const Bytes &bytes) {
-    result.push_back(bytes);
-    return true;
-  });
-  return result;
-}
-
-void Entity::mark_issued(const Bytes &bytes) {
-  const auto pdu = CFDP_PDU::from_bytes(bytes);
-  if (pdu.header.direction == PDU_Direction::ToFileReceiver &&
-      pdu.header.sourceEntityID == config_.entity_id) {
-    auto sender = senders_.find(pdu.header.transactionSequenceNumber);
-    if (sender != senders_.end()) {
-      if (const auto *data = std::get_if<FileData_PDU>(&pdu.body))
-        sender->second.sent_progress = std::max(
-            sender->second.sent_progress, data->offset + data->data.size());
-      if (const auto *eof = std::get_if<EOF_PDU>(&pdu.body);
-          eof && !sender->second.eof_issued) {
-        sender->second.eof_issued = true;
-        event(Event_Type::EOFSent, sender->second.header, eof->condition,
-              sender->second.sent_progress);
-        if (!acknowledged(sender->second.header) &&
-            !sender->second.metadata.closureRequested &&
-            eof->condition == Condition_Code::NoError) {
-          sender->second.done = true;
-          event(Event_Type::TransactionFinished, sender->second.header,
-                Condition_Code::NoError, sender->second.sent_progress);
-        }
-      }
-    }
-  } else if (std::holds_alternative<Finished_PDU>(pdu.body)) {
-    auto receiver = receivers_.find(
-        Key{pdu.header.sourceEntityID, pdu.header.transactionSequenceNumber});
-    if (receiver != receivers_.end())
-      receiver->second.finished_issued = true;
-  }
-}
 std::vector<Transfer> Entity::take_completed() {
   poll_storage();
   std::vector<Transfer> result;
