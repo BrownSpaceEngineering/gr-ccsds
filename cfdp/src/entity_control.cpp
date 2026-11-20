@@ -354,6 +354,8 @@ void Entity::forget_send(uint64_t sequence) {
   auto it = senders_.find(sequence);
   if (it == senders_.end() || !it->second.done || it->second.cancelling)
     throw std::invalid_argument("CFDP sender transaction is not complete");
+  if (user_operations_.has_pending_proxy(sequence))
+    throw std::logic_error("CFDP proxy response is still pending");
   for (const auto &queued : outgoing_) {
     const auto pdu = CFDP_PDU::from_bytes(queued.bytes);
     if (pdu.header.sourceEntityID == config_.entity_id &&
@@ -361,7 +363,6 @@ void Entity::forget_send(uint64_t sequence) {
       throw std::logic_error("CFDP transaction still has queued PDUs");
   }
   remote_suspensions_.erase(Key{config_.entity_id, sequence});
-  user_operations_.forget_sender(sequence);
   senders_.erase(it);
 }
 

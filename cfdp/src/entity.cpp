@@ -597,8 +597,6 @@ void Entity::receive(const Bytes &bytes) {
       }
       s.done = true;
       s.cancelling = false;
-      user_operations_.on_sender_finished(*this, h.transactionSequenceNumber,
-                                          s.result, s.filestore_responses);
     } else if (auto keepalive = std::get_if<KeepAlive_PDU>(&pdu.body)) {
       if (!acknowledged(s.header) || s.done ||
           keepalive->progress > s.file_size)
@@ -856,9 +854,11 @@ size_t Entity::send_outgoing(
     }
     outgoing_.swap(held);
   };
+  user_operations_.poll_completed(*this);
   queue_pending_finished();
   drain();
-  if (queue_pending_finished())
+  user_operations_.poll_completed(*this);
+  if (queue_pending_finished() || !outgoing_.empty())
     drain();
   return issued;
 }

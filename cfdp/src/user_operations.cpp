@@ -311,19 +311,29 @@ void UserOperations::report_proxy(Entity &entity, const ProxyContext &context,
              std::move(options));
 }
 
-void UserOperations::on_sender_finished(
-    Entity &entity, uint64_t sequence, Condition_Code result,
-    const std::vector<TLV> &filestore_responses) {
-  const auto pending = pending_proxies_.find(sequence);
-  if (pending == pending_proxies_.end())
-    return;
-  const auto context = pending->second;
-  pending_proxies_.erase(pending);
-  report_proxy(entity, context, result, filestore_responses);
+void UserOperations::poll_completed(Entity &entity) {
+  for (auto pending = pending_proxies_.begin(); pending != pending_proxies_.end();) {
+    const auto result = entity.sender_result(pending->first);
+    if (!result) {
+      ++pending;
+      continue;
+    }
+    try {
+      report_proxy(entity, pending->second, *result,
+                   entity.sender_filestore_responses(pending->first));
+    } catch (const std::length_error &) {
+      ++pending;
+      continue;
+    } catch (const std::overflow_error &) {
+      ++pending;
+      continue;
+    }
+    pending = pending_proxies_.erase(pending);
+  }
 }
 
-void UserOperations::forget_sender(uint64_t sequence) {
-  pending_proxies_.erase(sequence);
+bool UserOperations::has_pending_proxy(uint64_t sequence) const {
+  return pending_proxies_.contains(sequence);
 }
 
 void UserOperations::handle_proxy_cancel(

@@ -32,10 +32,9 @@ public:
                          uint64_t sequence);
   void process(Entity &entity, const PDU_Header &header,
                const Metadata_PDU &metadata, size_t covered);
-  void on_sender_finished(Entity &entity, uint64_t sequence,
-                          Condition_Code result,
-                          const std::vector<TLV> &filestore_responses);
-  void forget_sender(uint64_t sequence);
+  // Called outside outgoing queue traversal; capacity failures stay pending.
+  void poll_completed(Entity &entity);
+  bool has_pending_proxy(uint64_t sequence) const;
 
 private:
   struct ReservedMessage {
