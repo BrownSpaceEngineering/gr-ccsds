@@ -19,8 +19,14 @@ Give it the received capture (and, for the Levenshtein step, the transmitted fil
           (default 8224 bits)
 
 A "packet" is everything from one header's first bit up to the first bit of the next
-header. 8224 = 32 marker bits + 8192 payload bits (1024 bytes), so with the default
-settings the preamble is not part of a packet.
+header. Its expected size is  --frame-bytes * 8 + marker bits  (the marker is 4 bytes =
+32 bits), so the default 1024-byte frame gives 8192 + 32 = 8224 bits and the preamble
+is not part of a packet.
+
+--num-frames N says how many DIFFERENT transfer frames the test sends (one sync marker
+each). The TX file is cut to its first N packets and the received packets are paired
+with them cyclically, so a capture holding several repeats of the N frames still lines
+up. The summary then says which of the N frames were never received / never perfect.
 
 dropped (net) = expected length - received length. Positive means bits were lost,
 negative means extra bits appeared. The alignment columns (flip / drop / extra) come
@@ -34,7 +40,7 @@ Input formats (picked automatically unless you say otherwise):
 
 Examples:
   python3 analyze_link.py rx.bin --tx tx.bin
-  python3 analyze_link.py rx.bin --tx tx.bin --packet-bits 8224 --detail
+  python3 analyze_link.py rx.bin --tx tx.bin --frame-bytes 1024 --num-frames 10 --detail
   python3 analyze_link.py rx.bin                      (no --tx: steps 0, 1, 3, 4 only)
   python3 analyze_link.py rx.bin --tx tx_bits.txt --rx-format unpacked --include-last
 """
@@ -437,6 +443,12 @@ def step2_and_4(rx_packets, tx_packets, args):
           f"({args.packet_bits})")
     print("=" * 78)
     expected = args.packet_bits
+    print(f"expected packet: {args.packet_bits} bits "
+          f"(= {(args.packet_bits - args.marker_len) // 8} frame bytes + "
+          f"{args.marker_len // 8} marker bytes, header to header)")
+    if args.num_frames:
+        print(f"test design: {args.num_frames} different transfer frame(s), each with "
+              f"its own sync marker")
     if tx_packets:
         lens = Counter(len(p["bits"]) for p in tx_packets)
         common, count = lens.most_common(1)[0]
@@ -446,7 +458,8 @@ def step2_and_4(rx_packets, tx_packets, args):
             print(f"    TX lengths vary: {dict(lens)}")
         if common != expected:
             print(f"    WARNING: TX packets are {common} bits, not {expected}. If the "
-                  f"transmitter really sends {common}, use --packet-bits {common}.")
+                  f"transmitter really sends {common}, use --frame-bytes "
+                  f"{(common - args.marker_len) // 8}.")
         uniq = {}
         for i, p in enumerate(tx_packets):
             uniq.setdefault(bitstr(p["bits"]), i)
@@ -545,6 +558,23 @@ def step2_and_4(rx_packets, tx_packets, args):
           f"   ({gained} bits in total)")
     print(f"  net bits dropped over all       : {sum(p['dropped'] for p in counted)} "
           f"of {expected * total} expected")
+    if args.num_frames:
+        k = args.num_frames
+        found = len(rx_packets)
+        print(f"  headers found vs design         : {found} header(s); {k} different "
+              f"frame(s) per cycle -> {found / k:.2f} cycle(s)")
+        if not tx_bits and found < k:
+            print(f"    fewer headers than distinct frames: at least {k - found} "
+                  f"frame(s) never seen")
+    if tx_bits:
+        hits = Counter(p["tx"] for p in counted if p.get("tx") is not None)
+        perfect_hits = Counter(p["tx"] for p in counted if p.get("lev") == 0)
+        missing = [i + 1 for i in range(n_tx) if hits[i] == 0]
+        clean_missing = [i + 1 for i in range(n_tx) if perfect_hits[i] == 0]
+        print(f"  TX frames received (matched)    : {n_tx - len(missing)} of {n_tx}"
+              + (f"   never matched: {compact(missing, 20)}" if missing else ""))
+        print(f"  TX frames received bit-perfect  : {n_tx - len(clean_missing)} of {n_tx}"
+              + (f"   never perfect: {compact(clean_missing, 20)}" if clean_missing else ""))
     merged = [p for p in counted if p["status"] == "merged"]
     if merged:
         print(f"  merged segments                 : {len(merged)} (header missed or "
@@ -616,8 +646,17 @@ def main():
     p.add_argument("-e", "--errors", type=int, default=3,
                    help="errors allowed in a received header: flipped + dropped + "
                         "extra (default: 3)")
-    p.add_argument("--packet-bits", type=int, default=8224,
-                   help="bits a packet should contain, header to header (default: 8224)")
+    p.add_argument("--frame-bytes", type=int, default=1024,
+                   help="size of one transfer frame in BYTES, without the marker "
+                        "(default: 1024). A packet is frame-bytes*8 + marker bits "
+                        "(1024 -> 8192 + 32 = 8224)")
+    p.add_argument("--num-frames", type=int,
+                   help="how many DIFFERENT transfer frames (each with its own sync "
+                        "marker) the test sends. The TX file is cut to its first N "
+                        "packets, and received packets are paired cyclically with them")
+    p.add_argument("--packet-bits", type=int,
+                   help="override: bits a packet should contain, header to header "
+                        "(normally worked out from --frame-bytes)")
     p.add_argument("--min-gap", type=int,
                    help="closest two headers can be, in bits (default: half a packet)")
     p.add_argument("--preamble-len", type=int, default=32,
@@ -651,6 +690,13 @@ def main():
     if args.errors < 0 or args.errors >= len(marker_bits) // 4:
         p.error(f"--errors must be 0 to {len(marker_bits) // 4 - 1} for a "
                 f"{len(marker_bits)}-bit marker")
+    if args.frame_bytes < 1:
+        p.error("--frame-bytes must be at least 1")
+    if args.num_frames is not None and args.num_frames < 1:
+        p.error("--num-frames must be at least 1")
+    args.marker_len = len(marker_bits)
+    if args.packet_bits is None:
+        args.packet_bits = args.frame_bytes * 8 + len(marker_bits)
     if args.packet_bits <= len(marker_bits):
         p.error("--packet-bits must be larger than the marker")
     if args.min_gap is None:
@@ -690,6 +736,16 @@ def main():
             last = tx_packets[-1]
             if len(last["bits"]) != args.packet_bits:  # an unfinished tail is not a packet
                 tx_packets = tx_packets[:-1] or None
+            if tx_packets and args.num_frames:
+                if len(tx_packets) < args.num_frames:
+                    print(f"warning: --num-frames is {args.num_frames} but the TX file "
+                          f"holds only {len(tx_packets)} complete packet(s); using "
+                          f"{len(tx_packets)}.\n")
+                elif len(tx_packets) > args.num_frames:
+                    print(f"note: TX file holds {len(tx_packets)} packets; using the "
+                          f"first {args.num_frames} (--num-frames) as the distinct "
+                          f"frames.\n")
+                tx_packets = tx_packets[:args.num_frames]
     counted = step2_and_4(rx_packets, tx_packets, args)
 
     prefix = args.output or os.path.splitext(args.rx)[0]
