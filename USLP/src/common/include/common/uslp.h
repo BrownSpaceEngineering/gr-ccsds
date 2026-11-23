@@ -151,6 +151,8 @@ public:
     {
         PrintVirtualChannelConfigs();
 
+        m_dataZoneLength = ResolveDataZoneLength();
+
         m_vcidToIndex.fill(-1);
 
         for (size_t i = 0; i < VC_COUNT; i++) {
@@ -171,6 +173,9 @@ public:
             m_virtualChannels[i].interFrameDelay = std::chrono::milliseconds(
                 managedParams.virtualChannelConfigs[i].interFrameDelayMs
             );
+
+            // Frame size comes from the physical channel configuration, not from a default argument
+            m_virtualChannels[i].accumulator.m_fixedTfdzSize = m_dataZoneLength;
         }
 
         // 3. Setup the IDLE channel in the final slot
@@ -179,6 +184,7 @@ public:
         
         m_virtualChannels[idleIndex].initializeMask(6);
         m_virtualChannels[idleIndex].expirationTime = std::chrono::milliseconds(50);
+        m_virtualChannels[idleIndex].accumulator.m_fixedTfdzSize = m_dataZoneLength;
 
         PrintVCIDMapping();
         InitNetworkSocket();
@@ -192,6 +198,7 @@ public:
 
         std::ofstream outFile("TestOutput.txt", std::ios::trunc);
         outFile = std::ofstream("PacketOutput.txt", std::ios::trunc);
+        outFile = std::ofstream("BitOutput.txt", std::ios::trunc);
     }
 
     ~USLP() {
@@ -322,6 +329,48 @@ public:
         m_vcpNotifyCallback = cb;
     }
 private:
+    /**
+     * @brief Turns the configured transfer frame length into a data zone length.
+     *
+     * Subtracts the fields the configuration says are actually present, clamping the
+     * frame length to what the compile-time buffers can hold. Called once, so every
+     * virtual channel accumulates to the same size and one config value governs it all.
+     */
+    size_t ResolveDataZoneLength() {
+        size_t overhead = PRIMARY_HEADER_LENGTH + DATA_FIELD_HEADER_LENGTH;
+
+        if (managedParams.physical.FECFPresent) {
+            overhead += managedParams.physical.isCRC32 ? CRC32_DATA_LENGTH : CRC16_DATA_LENGTH;
+        }
+        if (managedParams.physical.insertZonePresent) {
+            overhead += managedParams.physical.insertZoneLength;
+        }
+
+        if (managedParams.physical.transferFrameLength > MAX_FRAME_BODY_LENGTH) {
+            std::cerr << "[ERROR] USLP: transferFrameLength of "
+                      << managedParams.physical.transferFrameLength
+                      << " exceeds the " << MAX_FRAME_BODY_LENGTH
+                      << " octet buffer ceiling; clamping. Raise MAX_FRAME_BODY_LENGTH in data.h.\n";
+            managedParams.physical.transferFrameLength = MAX_FRAME_BODY_LENGTH;
+        }
+
+        if (managedParams.physical.transferFrameLength <= overhead) {
+            std::cerr << "[ERROR] USLP: transferFrameLength of "
+                      << managedParams.physical.transferFrameLength
+                      << " leaves no room for a data zone past " << overhead
+                      << " octets of overhead; using the maximum instead.\n";
+            managedParams.physical.transferFrameLength = MAX_FRAME_BODY_LENGTH;
+        }
+
+        size_t dataZoneLength = managedParams.physical.transferFrameLength - overhead;
+
+        std::cout << "Transfer frame length: " << managedParams.physical.transferFrameLength
+                  << " octets (" << overhead << " overhead + "
+                  << dataZoneLength << " data zone)\n";
+
+        return dataZoneLength;
+    }
+
     void InitNetworkSocket();
     void CleanupNetworkSocket();
     void SendToGNURadio(const BitBuffer<MAX_CCS_SL_FRAME_LENGTH>& serializedBytes);
@@ -330,6 +379,7 @@ private:
     sockaddr_in m_gnuRadioAddr{};
 
     std::array<int8_t, MAX_VC_COUNT> m_vcidToIndex{5};
+    size_t m_dataZoneLength = MAX_DATA_ZONE_LENGTH; // Resolved from the configuration at construction
     std::array<VirtualChannel, NUM_ACTIVE_CHANNELS> m_virtualChannels{};
     ThreadSafeMultiplexerQueue<TransferFrame> m_frameMultiplexerQueue;
     std::array<TFAllFormats, maxFinishedTransferFrames> m_finishedTransferFrames;

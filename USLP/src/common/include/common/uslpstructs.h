@@ -39,7 +39,10 @@ struct USLPConfig {
     struct PhysicalChannel {
         std::string physicalChannelName;		   // USLP-113
         FrameType frameType = FrameType::FIXED;    // USLP-114
-        uint16_t transferFrameLength = 1024;       // USLP-115
+        // USLP-115. The single knob for frame size: the USLP constructor derives every
+        // channel's data zone length from it, and it is advertised in the primary header.
+        // Must not exceed MAX_FRAME_BODY_LENGTH, the compile-time buffer ceiling in data.h.
+        uint16_t transferFrameLength = MAX_FRAME_BODY_LENGTH;
         uint8_t TFVN = 0b1100;                     // USLP-116
         uint8_t MCMultiplexingScheme;              // USLP-117
         bool insertZonePresent = false;            // USLP-118

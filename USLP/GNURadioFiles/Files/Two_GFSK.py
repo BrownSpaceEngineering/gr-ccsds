@@ -21,7 +21,6 @@ from PyQt5 import Qt
 from argparse import ArgumentParser
 from gnuradio.eng_arg import eng_float, intx
 from gnuradio import eng_notation
-from gnuradio import network
 import math
 import osmosdr
 import time
@@ -128,14 +127,13 @@ class Two_GFSK(gr.top_block, Qt.QWidget):
         )
         self.osmosdr_sink_0.set_time_unknown_pps(osmosdr.time_spec_t())
         self.osmosdr_sink_0.set_sample_rate(samp_rate)
-        self.osmosdr_sink_0.set_center_freq(440e6, 0)
+        self.osmosdr_sink_0.set_center_freq(437.765e6, 0)
         self.osmosdr_sink_0.set_freq_corr(0, 0)
         self.osmosdr_sink_0.set_gain(10, 0)
         self.osmosdr_sink_0.set_if_gain(20, 0)
         self.osmosdr_sink_0.set_bb_gain(20, 0)
         self.osmosdr_sink_0.set_antenna('', 0)
         self.osmosdr_sink_0.set_bandwidth(0, 0)
-        self.network_udp_source_0 = network.udp_source(gr.sizeof_char, 1, 5000, 0, 1472, False, False, False)
         self.digital_gfsk_mod_0 = digital.gfsk_mod(
             samples_per_symbol=(int(samp_rate/symbols_per_second)),
             sensitivity=(2*math.pi*fd/samp_rate),
@@ -144,14 +142,15 @@ class Two_GFSK(gr.top_block, Qt.QWidget):
             log=False,
             do_unpack=True)
         self.digital_gfsk_demod_0 = digital.gfsk_demod(
-            samples_per_symbol=8,
+            samples_per_symbol=40,
             sensitivity=(2*math.pi*fd/samp_rate),
-            gain_mu=0.175,
+            gain_mu=0.05,
             mu=0.5,
-            omega_relative_limit=0.005,
+            omega_relative_limit=0.001,
             freq_error=0.0,
             verbose=False,
             log=False)
+        self.blocks_vector_source_x_0 = blocks.vector_source_b((17, 17), True, 1, [])
         self.blocks_char_to_float_0 = blocks.char_to_float(1, 1)
 
 
@@ -159,10 +158,10 @@ class Two_GFSK(gr.top_block, Qt.QWidget):
         # Connections
         ##################################################
         self.connect((self.blocks_char_to_float_0, 0), (self.qtgui_time_sink_x_0_0, 0))
+        self.connect((self.blocks_vector_source_x_0, 0), (self.digital_gfsk_mod_0, 0))
         self.connect((self.digital_gfsk_demod_0, 0), (self.blocks_char_to_float_0, 0))
         self.connect((self.digital_gfsk_mod_0, 0), (self.digital_gfsk_demod_0, 0))
         self.connect((self.digital_gfsk_mod_0, 0), (self.osmosdr_sink_0, 0))
-        self.connect((self.network_udp_source_0, 0), (self.digital_gfsk_mod_0, 0))
 
 
     def closeEvent(self, event):

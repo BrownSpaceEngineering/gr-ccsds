@@ -198,7 +198,7 @@ void RunUslpTemporalStandardsTest() {
         USLPConfig::PhysicalChannel {
             .physicalChannelName = "TEST_LINK",
             .frameType = USLPConfig::FrameType::FIXED,
-            .transferFrameLength = 1024,
+            .transferFrameLength = 512,
             .TFVN = 0b1100,
             .MCMultiplexingScheme = 0,
             .insertZonePresent = false,

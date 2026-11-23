@@ -81,6 +81,18 @@ void WriteBytes(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes) {
 	}
 }
 
+// Writes the frame to .txt as raw MSB-first bit characters with no separators.
+// The first startOffset bytes are skipped so the acquisition preamble is left out.
+void WriteBits(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes, size_t startOffset) {
+	std::ofstream out("BitOutput.txt", std::ios::app);
+
+	for (size_t i = startOffset; i < static_cast<size_t>(serializedBytes.length); i++) {
+		for (int bit = 7; bit >= 0; --bit) {
+			out << ((serializedBytes.data[i] >> bit) & 1);
+		}
+	}
+}
+
 // Helper function to calculate CRC-16 or CRC-32 over the frame bytes
 uint32_t ComputeCRC(const uint8_t* data, size_t length, bool isCRC32) {
     if (isCRC32) {

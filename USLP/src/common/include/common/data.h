@@ -20,18 +20,31 @@
 #define ZERO									0
 #define MAX_SECURITY_HEADER_LENGTH 				20
 #define MAX_SECURITY_TRAILER_LENGTH 			20
-constexpr uint16_t MAX_DATA_FIELD_LENGTH =  	1012;  	// MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-constexpr uint16_t MAX_DATA_ZONE_LENGTH =   	1009; 	// MAX_TRANSFER_FRAME_LENGTH - mandatory bytes = 1014
-#define MAX_INSERT_ZONE_LENGTH					1024  	// Apparently specified to worst case take maximum TF size
 #define OCF_DATA_LENGTH 						4
 #define CRC16_DATA_LENGTH 						2
 #define CRC32_DATA_LENGTH 						4
 #define FECF_DATA_LENGTH 						4 		// Default FECF using CRC32
-constexpr uint8_t ASM_LENGTH =					4;
-constexpr uint16_t MAX_TRANSFER_FRAME_LENGTH =  1024 + ASM_LENGTH;
-constexpr uint16_t MAX_CCS_SL_FRAME_LENGTH =    2 * MAX_TRANSFER_FRAME_LENGTH;
 #define PRIMARY_HEADER_LENGTH					8
 #define DATA_FIELD_HEADER_LENGTH				3
+constexpr uint8_t ASM_LENGTH =					4;
+
+// Compile-time ceiling: the longest transfer frame the fixed-capacity buffers can ever hold.
+// It is NOT the length transmitted. That is USLPConfig::PhysicalChannel::transferFrameLength,
+// a runtime value which the USLP constructor validates against this ceiling. Lower this only
+// to reclaim memory, and only if no mission configuration will ask for a longer frame.
+constexpr uint16_t MAX_FRAME_BODY_LENGTH =		1024;
+
+// Octets every fixed frame spends on headers and the FECF; the data zone gets the remainder.
+// This is the worst case used to size buffers. The USLP constructor recomputes the real
+// overhead from the configuration, since the insert zone, the OCF and the FECF are optional.
+constexpr uint16_t FRAME_OVERHEAD_LENGTH =		PRIMARY_HEADER_LENGTH + DATA_FIELD_HEADER_LENGTH + FECF_DATA_LENGTH;
+
+// Derived from MAX_FRAME_BODY_LENGTH so the capacities cannot drift out of step with each other
+constexpr uint16_t MAX_DATA_FIELD_LENGTH =  	MAX_FRAME_BODY_LENGTH - PRIMARY_HEADER_LENGTH - FECF_DATA_LENGTH;
+constexpr uint16_t MAX_DATA_ZONE_LENGTH =   	MAX_FRAME_BODY_LENGTH - FRAME_OVERHEAD_LENGTH;
+#define MAX_INSERT_ZONE_LENGTH					MAX_FRAME_BODY_LENGTH 	// Worst case takes a maximum-size TF
+constexpr uint16_t MAX_TRANSFER_FRAME_LENGTH =  MAX_FRAME_BODY_LENGTH + ASM_LENGTH;
+constexpr uint16_t MAX_CCS_SL_FRAME_LENGTH =    2 * MAX_TRANSFER_FRAME_LENGTH;
 constexpr uint8_t CCSDS_EIP_HEADER = 0xE0;				// Define the standard 1-byte CCSDS Encapsulation Idle Packet (EIP) header
 
 // Upper Level Macros

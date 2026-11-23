@@ -20,7 +20,7 @@ std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physi
     switch (m_config.selectedOptions.randomizer) {
         case CCS_SLConfig::Randomizer::LONG:
             std::cout << "picked randomizer\n";
-            PseudoRandomize(physicalData, physicalLength);
+            //PseudoRandomize(physicalData, physicalLength);
             break;
         case CCS_SLConfig::Randomizer::NONE:
             // Bypassed: frame passes through unscrambled

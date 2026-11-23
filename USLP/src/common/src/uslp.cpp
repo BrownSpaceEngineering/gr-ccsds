@@ -54,7 +54,10 @@ TFPrimaryHeader USLP::GetPrimaryHeader(uint8_t VCID) {
 	tfph.VCID = VCID;
 	tfph.MAPID = 0; // We do not need MAP, not so many pieces of data to transfer
 	tfph.endTFPrimaryHeaderFlag = 0; // Decided possibly if we need super fast transfer of packet
-	tfph.TFLength = MAX_TRANSFER_FRAME_LENGTH - 1; // Could be variable, current model transmits fixed frames (in octets) (-1 since spec says one less than actual size)
+	// Fixed-length frames, so this is the configured length for every frame. The ASM is not
+	// part of the transfer frame and so is excluded. -1 since the spec encodes one less than
+	// the actual size.
+	tfph.TFLength = managedParams.physical.transferFrameLength - 1;
 	tfph.bypassSequenceControlFlag = 1; // Expedited Frame, no COP
 	tfph.protocolCommandControlFlag = 0; // Generally sending CFDP packets, user data
 	tfph.spare = 0b00; // Decide what to do with this later
@@ -200,7 +203,7 @@ void USLP::VCMultiplexer() {
         } else {
             // CASE B: 20ms passed with absolutely zero activity. Generate OID.
             BitBuffer<MAX_DATA_ZONE_LENGTH> idlePayload;
-            idlePayload.fill(0, IDLE_PATTERN, MAX_DATA_ZONE_LENGTH);
+            idlePayload.fill(0, IDLE_PATTERN, m_dataZoneLength);
 			int8_t vcidIndex = GetChannelByVCID(IDLE_VCID, m_vcidToIndex);
 			m_virtualChannels[vcidIndex].incrementFrameCount();
             
@@ -454,6 +457,7 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 
     // 6. Send out over our ports and queues
     WriteBytes(physicalFrameBuffer);
+    WriteBits(physicalFrameBuffer, ccs_sl.LastPreambleLength());
     SendToGNURadio(physicalFrameBuffer);
     m_receptionQueue.push(serializedBytes);
 
@@ -550,7 +554,7 @@ int main(int argc, char* argv[]) {
 		USLPConfig::PhysicalChannel {
 			.physicalChannelName = "BROWN_SAT_LINK_1",
 			.frameType = USLPConfig::FrameType::FIXED,
-			.transferFrameLength = 1024,
+			.transferFrameLength = 512,
 			.TFVN = 0b1100,
 			.MCMultiplexingScheme = 0,
 			.insertZonePresent = false,

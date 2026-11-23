@@ -30,13 +30,21 @@ public:
         // 3. Prepend the one-time acquisition preamble ahead of the first frame only.
         // It sits outside the randomizer and the encoder so the demodulator sees raw
         // alternating bits while its AGC and symbol timing loop pull in.
+        m_lastPreambleLength = 0;
         if (!m_preambleSent) {
             physicalBytes.insert(physicalBytes.begin(), PREAMBLE_LENGTH, PREAMBLE_BYTE);
+            m_lastPreambleLength = PREAMBLE_LENGTH;
             m_preambleSent = true;
         }
 
         return physicalBytes;
     }
+
+    /**
+     * @brief Preamble bytes prepended to the most recently processed frame, zero after the first.
+     * Lets a caller log or replay the frame proper without the acquisition preamble.
+     */
+    size_t LastPreambleLength() const { return m_lastPreambleLength; }
 
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
     void PseudoRandomize(uint8_t* data, size_t length);
@@ -75,6 +83,7 @@ private:
     static constexpr uint8_t PREAMBLE_BYTE = 0xAA;
     static constexpr size_t PREAMBLE_LENGTH = 4;
     bool m_preambleSent = false;
+    size_t m_lastPreambleLength = 0;
     
     // --- State variables for convolutional encoding ---
     uint8_t convState = 0; 

@@ -116,7 +116,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [344, 200.0]
+    coordinate: [352, 360.0]
     rotation: 0
     state: disabled
 - name: blocks_vector_source_x_0
@@ -138,7 +138,7 @@ blocks:
     bus_structure: null
     coordinate: [200, 260.0]
     rotation: 0
-    state: disabled
+    state: enabled
 - name: digital_gfsk_demod_0
   id: digital_gfsk_demod
   parameters:
@@ -146,13 +146,13 @@ blocks:
     alias: ''
     comment: ''
     freq_error: '0.0'
-    gain_mu: '0.175'
+    gain_mu: '0.05'
     log: 'False'
     maxoutbuf: '0'
     minoutbuf: '0'
     mu: '0.5'
-    omega_relative_limit: '0.005'
-    samples_per_symbol: '8'
+    omega_relative_limit: '0.001'
+    samples_per_symbol: '40'
     sensitivity: 2*math.pi*fd/samp_rate
     verbose: 'False'
   states:
@@ -180,7 +180,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [544, 196.0]
+    coordinate: [544, 188.0]
     rotation: 0
     state: enabled
 - name: import_0
@@ -216,9 +216,9 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [288, 352.0]
+    coordinate: [288, 88.0]
     rotation: 0
-    state: enabled
+    state: disabled
 - name: osmosdr_sink_0
   id: osmosdr_sink
   parameters:
@@ -362,7 +362,7 @@ blocks:
     corr7: '0'
     corr8: '0'
     corr9: '0'
-    freq0: 440e6
+    freq0: 437.765e6
     freq1: 100e6
     freq10: 100e6
     freq11: 100e6
@@ -679,6 +679,7 @@ connections:
 - [blocks_char_to_float_0, '0', qtgui_time_sink_x_0_0, '0']
 - [blocks_throttle2_0_1, '0', digital_gfsk_mod_0, '0']
 - [blocks_vector_source_x_0, '0', blocks_throttle2_0_1, '0']
+- [blocks_vector_source_x_0, '0', digital_gfsk_mod_0, '0']
 - [digital_gfsk_demod_0, '0', blocks_char_to_float_0, '0']
 - [digital_gfsk_mod_0, '0', digital_gfsk_demod_0, '0']
 - [digital_gfsk_mod_0, '0', osmosdr_sink_0, '0']

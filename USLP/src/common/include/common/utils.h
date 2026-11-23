@@ -29,6 +29,8 @@ std::array<uint8_t, 4> CRCGenerator();
 std::array<uint8_t, TEST_ARRAY_SIZE> GenerateRandomBytes();
 // Writes Bytes to .txt assuming maximum transfer frame capacity
 void WriteBytes(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes);
+// Writes the frame to .txt as raw bit characters, skipping the leading startOffset bytes
+void WriteBits(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes, size_t startOffset);
 
 // Definition lives here because it is a template
 template <size_t M, size_t N> void append(const BitBuffer<M>& src, BitBuffer<N>& dest, size_t& offset) {
