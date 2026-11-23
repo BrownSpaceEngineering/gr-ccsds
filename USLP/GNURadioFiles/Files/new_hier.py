@@ -207,7 +207,7 @@ class new_hier(gr.top_block, Qt.QWidget):
         self.freq_xlating_fir_filter_xxx_0 = filter.freq_xlating_fir_filter_ccc((int(round(samp_rate / (8*symbols_per_second)))), firdes.low_pass(1, samp_rate, 150e3, 100e3), 0, samp_rate)
         self.digital_gfsk_demod_0 = digital.gfsk_demod(
             samples_per_symbol=8,
-            sensitivity=(math.pi*0.5/8),
+            sensitivity=(2*math.pi*fd/samp_rate),
             gain_mu=0.175,
             mu=0.5,
             omega_relative_limit=0.005,
