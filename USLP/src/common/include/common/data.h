@@ -26,7 +26,16 @@
 #define FECF_DATA_LENGTH 						4 		// Default FECF using CRC32
 #define PRIMARY_HEADER_LENGTH					8
 #define DATA_FIELD_HEADER_LENGTH				3
-constexpr uint8_t ASM_LENGTH =					4;
+
+// MR-FSK Synchronization Header (SHR) for the AT86RF215 RAW-SFD-16 PPDU. Both fields go
+// out in the clear ahead of every frame: the receiver correlates against them before it
+// has any bit or frame timing, so neither may be randomized or encoded.
+constexpr uint8_t FSK_PREAMBLE_BYTE =			0x55; 	// 01010101, AT86RF215 section 6.10.3.1
+constexpr uint8_t FSK_PREAMBLE_LENGTH =			8; 		// Octets. Minimum for a 150-300kHz symbol
+														// rate per AT86RF215 Table 6-64, which asks
+														// for 10 at 400kHz and allows 2-3 below 150kHz.
+constexpr uint8_t FSK_SFD_LENGTH =				2; 		// SFD-16
+constexpr uint8_t SHR_LENGTH =					FSK_PREAMBLE_LENGTH + FSK_SFD_LENGTH;
 
 // Compile-time ceiling: the longest transfer frame the fixed-capacity buffers can ever hold.
 // It is NOT the length transmitted. That is USLPConfig::PhysicalChannel::transferFrameLength,
@@ -43,7 +52,7 @@ constexpr uint16_t FRAME_OVERHEAD_LENGTH =		PRIMARY_HEADER_LENGTH + DATA_FIELD_H
 constexpr uint16_t MAX_DATA_FIELD_LENGTH =  	MAX_FRAME_BODY_LENGTH - PRIMARY_HEADER_LENGTH - FECF_DATA_LENGTH;
 constexpr uint16_t MAX_DATA_ZONE_LENGTH =   	MAX_FRAME_BODY_LENGTH - FRAME_OVERHEAD_LENGTH;
 #define MAX_INSERT_ZONE_LENGTH					MAX_FRAME_BODY_LENGTH 	// Worst case takes a maximum-size TF
-constexpr uint16_t MAX_TRANSFER_FRAME_LENGTH =  MAX_FRAME_BODY_LENGTH + ASM_LENGTH;
+constexpr uint16_t MAX_TRANSFER_FRAME_LENGTH =  MAX_FRAME_BODY_LENGTH + SHR_LENGTH;
 constexpr uint16_t MAX_CCS_SL_FRAME_LENGTH =    2 * MAX_TRANSFER_FRAME_LENGTH;
 constexpr uint8_t CCSDS_EIP_HEADER = 0xE0;				// Define the standard 1-byte CCSDS Encapsulation Idle Packet (EIP) header
 

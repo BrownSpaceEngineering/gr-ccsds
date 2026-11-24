@@ -1,5 +1,6 @@
 #include <common/ccs_sl.h>
 #include <iostream>
+#include <algorithm>
 
 // Constructor implementation
 CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {
@@ -9,8 +10,8 @@ CCS_SL::CCS_SL(const CCS_SLConfig& config) : m_config(config) {
     }
 }
 
-// Coordinates the physical layer execution sequence and returns the finished data
-std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physicalLength) {
+// Coordinates the physical layer execution sequence over the caller's buffer in place
+size_t CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physicalLength, size_t capacity) {
     // 1. Pseudorandomisation (scrambling)
     std::cout << "\n";
     std::cout << "\n";
@@ -20,7 +21,7 @@ std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physi
     switch (m_config.selectedOptions.randomizer) {
         case CCS_SLConfig::Randomizer::LONG:
             std::cout << "picked randomizer\n";
-            //PseudoRandomize(physicalData, physicalLength);
+            PseudoRandomize(physicalData, physicalLength);
             break;
         case CCS_SLConfig::Randomizer::NONE:
             // Bypassed: frame passes through unscrambled
@@ -31,13 +32,23 @@ std::vector<uint8_t> CCS_SL::ExecutePipeline(uint8_t* physicalData, size_t physi
     }
 
     // 2. Channel Coding
-    if (m_config.selectedOptions.codingMethod == CCS_SLConfig::CodingMethod::CONVOLUTIONAL) {
-        // Returns the 2048-byte convolutional encoded stream
-        return Encode(physicalData, physicalLength);
-    } else {
-        // If no channel coding is selected, return the scrambled 1024-byte physical frame directly
-        return std::vector<uint8_t>(physicalData, physicalData + physicalLength);
+    if (m_config.selectedOptions.codingMethod != CCS_SLConfig::CodingMethod::CONVOLUTIONAL) {
+        // Nothing further to do: the scrambled frame already sits where the caller wants it
+        return physicalLength;
     }
+
+    // The encoder doubles its input, so it cannot expand in place. This is the only
+    // allocation left on the frame path, and only when FEC is enabled.
+    std::vector<uint8_t> encoded = Encode(physicalData, physicalLength);
+
+    if (encoded.size() > capacity) {
+        std::cerr << "[ERROR] CCS_SL: coded frame of " << encoded.size()
+                  << " octets exceeds the " << capacity << " octet buffer; frame left uncoded\n";
+        return physicalLength;
+    }
+
+    std::copy(encoded.begin(), encoded.end(), physicalData);
+    return encoded.size();
 }
 
 // Standard CCSDS Additive Scrambler (x^17 + x^14 + 1)

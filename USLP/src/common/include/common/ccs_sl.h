@@ -14,37 +14,41 @@ public:
     ~CCS_SL() = default;
 
     /**
-     * @brief Entry point from the USLP stack. Prepends ASM and delegates to the compiled pipeline.
-     * @return A vector containing the sync-marked, scrambled, and potentially encoded physical bytes.
+     * @brief Entry point from the USLP stack. Builds one AT86RF215 RAW-SFD-16 PPDU.
+     *
+     * The transfer frame alone becomes the PSDU, so it is what the randomizer and the
+     * encoder operate on. The Synchronization Header is then prepended in the clear,
+     * because the receiver correlates against the preamble and the sync word before it
+     * has recovered any bit timing and so cannot descramble them.
+     *
+     * @return preamble, then SFD-16, then the randomized and optionally encoded frame.
      */
     template <size_t Capacity>
-    std::vector<uint8_t> ProcessFrame(const BitBuffer<Capacity>& logicalFrame) {
-        // 1. Prepend the 4-byte 1ACFFC1D synchronization marker (creates 1024-byte block)
-        BitBuffer<Capacity + 4> physicalFrame;
-        physicalFrame.insertAtEnd(CCSDS_ASM, 4);
-        physicalFrame.insertAtEnd(logicalFrame.data.data(), logicalFrame.length);
+    BitBuffer<MAX_CCS_SL_FRAME_LENGTH> ProcessFrame(const BitBuffer<Capacity>& logicalFrame) {
+        BitBuffer<MAX_CCS_SL_FRAME_LENGTH> ppdu;
 
-        // 2. Delegate the physical layer execution
-        std::vector<uint8_t> physicalBytes = ExecutePipeline(physicalFrame.data.data(), physicalFrame.length);
+        // 1. Lay the SHR down first, so the PSDU lands at its final offset and never moves.
+        // Every frame carries its own: the AT86RF215 is a packet receiver that returns to
+        // LISTEN after each PPDU, and SFD detection requires the PREAMBLE_LOCK state.
+        ppdu.fill(0, FSK_PREAMBLE_BYTE, FSK_PREAMBLE_LENGTH);
+        ppdu.insertAtEnd(FSK_SFD0, FSK_SFD_LENGTH);
 
-        // 3. Prepend the one-time acquisition preamble ahead of the first frame only.
-        // It sits outside the randomizer and the encoder so the demodulator sees raw
-        // alternating bits while its AGC and symbol timing loop pull in.
-        m_lastPreambleLength = 0;
-        if (!m_preambleSent) {
-            physicalBytes.insert(physicalBytes.begin(), PREAMBLE_LENGTH, PREAMBLE_BYTE);
-            m_lastPreambleLength = PREAMBLE_LENGTH;
-            m_preambleSent = true;
-        }
+        // 2. Copy the transfer frame in behind it. This is the one unavoidable copy: the
+        // caller's frame is const and the pipeline scrambles in place.
+        ppdu.insertAtEnd(logicalFrame.data.data(), logicalFrame.length);
 
-        return physicalBytes;
+        // 3. Run the physical layer over the PSDU region only, leaving the SHR in the clear.
+        ppdu.length = SHR_LENGTH + ExecutePipeline(ppdu.data.data() + SHR_LENGTH,
+                                                   logicalFrame.length,
+                                                   MAX_CCS_SL_FRAME_LENGTH - SHR_LENGTH);
+        return ppdu;
     }
 
     /**
-     * @brief Preamble bytes prepended to the most recently processed frame, zero after the first.
-     * Lets a caller log or replay the frame proper without the acquisition preamble.
+     * @brief Octets of Synchronization Header prepended to each frame by ProcessFrame.
+     * Lets a caller log or replay just the PSDU, which is what the receiver's frame buffer holds.
      */
-    size_t LastPreambleLength() const { return m_lastPreambleLength; }
+    static constexpr size_t SHRLength() { return SHR_LENGTH; }
 
     std::vector<uint8_t> Encode(const uint8_t* data, size_t length);
     std::vector<uint8_t> FourEncode(const uint8_t* data, size_t length);
@@ -75,16 +79,18 @@ private:
     uint8_t m_outByte = 0;
     uint8_t m_outBitCount = 0;
 
-    std::vector<uint8_t> ExecutePipeline(uint8_t* physicalData, size_t physicalLength);
+    /**
+     * @brief Randomizes and optionally encodes the PSDU in place.
+     * @return the resulting PSDU length, which the encoder doubles when FEC is enabled.
+     */
+    size_t ExecutePipeline(uint8_t* physicalData, size_t physicalLength, size_t capacity);
 
     CCS_SLConfig m_config;
-    const uint8_t CCSDS_ASM[4] = {0x1A, 0xCF, 0xFC, 0x1D};
 
-    // Acquisition preamble: 0xAA repeated, emitted ahead of the first frame and never again
-    static constexpr uint8_t PREAMBLE_BYTE = 0xAA;
-    static constexpr size_t PREAMBLE_LENGTH = 4;
-    bool m_preambleSent = false;
-    size_t m_lastPreambleLength = 0;
+    // AT86RF215 SFD0, the uncoded sync word. Registers {FSKSFD0H, FSKSFD0L} hold {0x72, 0x09}
+    // and are transmitted LSB first (datasheet 6.10.7.7-6.10.7.8), which puts 10010000 01001110
+    // on air. SFD1, the coded counterpart, would be {0x6F, 0x4E}.
+    static constexpr uint8_t FSK_SFD0[FSK_SFD_LENGTH] = {0x90, 0x4E};
     
     // --- State variables for convolutional encoding ---
     uint8_t convState = 0; 

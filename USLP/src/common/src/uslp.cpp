@@ -451,13 +451,12 @@ void USLP::AllFramesGenerationFunction(TransferFrame& tf) {
 
 	cout << "Length of serialized bytes: " << serializedBytes.length << endl;
 	
-	std::vector<uint8_t> physicalBytes = ccs_sl.ProcessFrame(serializedBytes);
-	BitBuffer<MAX_CCS_SL_FRAME_LENGTH> physicalFrameBuffer(physicalBytes.data(), physicalBytes.size());
+	BitBuffer<MAX_CCS_SL_FRAME_LENGTH> physicalFrameBuffer = ccs_sl.ProcessFrame(serializedBytes);
 	cout << "Length of physical bytes: " << physicalFrameBuffer.length << endl;
 
     // 6. Send out over our ports and queues
     WriteBytes(physicalFrameBuffer);
-    WriteBits(physicalFrameBuffer, ccs_sl.LastPreambleLength());
+    WriteBits(physicalFrameBuffer, CCS_SL::SHRLength());
     SendToGNURadio(physicalFrameBuffer);
     m_receptionQueue.push(serializedBytes);
 

@@ -82,7 +82,8 @@ void WriteBytes(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes) {
 }
 
 // Writes the frame to .txt as raw MSB-first bit characters with no separators.
-// The first startOffset bytes are skipped so the acquisition preamble is left out.
+// The first startOffset bytes are skipped so the Synchronization Header is left out,
+// leaving the PSDU alone: the same octets the receiver stores in its frame buffer.
 void WriteBits(BitBuffer<MAX_CCS_SL_FRAME_LENGTH> &serializedBytes, size_t startOffset) {
 	std::ofstream out("BitOutput.txt", std::ios::app);
 

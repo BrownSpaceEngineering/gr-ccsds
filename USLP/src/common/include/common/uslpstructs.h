@@ -146,7 +146,7 @@ struct CCS_SLConfig {
     struct ConvolutionalCodeConfig {
         CodeRates codeRate = CodeRates::ONE_HALF;
         bool slicing = false; // should always be false
-        uint16_t transferFrameLength = MAX_TRANSFER_FRAME_LENGTH - ASM_LENGTH;
+        uint16_t transferFrameLength = MAX_TRANSFER_FRAME_LENGTH - SHR_LENGTH;
     };
 
     SelectedOptions selectedOptions;

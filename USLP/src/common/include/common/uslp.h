@@ -403,6 +403,4 @@ private:
     uint64_t m_crcErrorCount = 0; // Global counter tracking frames discarded due to checksum failures
     std::thread m_receptionThread; // Thread handle managing the background AllFramesReception processing loop
     std::thread m_packetsWriterThread; // Writes received packets out to disc
-
-    const uint8_t CCSDS_ASM[4] = {0x1A, 0xCF, 0xFC, 0x1D};
 };
